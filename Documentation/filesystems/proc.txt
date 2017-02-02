@@ -1898,6 +1898,7 @@ The following mount options are supported:
 
 	hidepid=	Set /proc/<pid>/ access mode.
 	gid=		Set the group authorized to learn processes information.
+	pidfs		Restrict access to all /proc/ files except /proc/<pid>/.
 
 hidepid=0 means classic mode - everybody may access all /proc/<pid>/ directories
 (default).
@@ -1922,3 +1923,5 @@ run any program at all, etc.
 gid= defines a group authorized to learn processes information otherwise
 prohibited by hidepid=.  If you use some daemon like identd which needs to learn
 information about processes information, just add identd to this group.
+
+pidfs TODO(legion)

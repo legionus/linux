@@ -24,12 +24,13 @@
 #include "internal.h"
 
 enum {
-	Opt_gid, Opt_hidepid, Opt_err,
+	Opt_gid, Opt_hidepid, Opt_pidfs, Opt_err,
 };
 
 static const match_table_t tokens = {
 	{Opt_hidepid, "hidepid=%u"},
 	{Opt_gid, "gid=%u"},
+	{Opt_pidfs, "pidfs"},
 	{Opt_err, NULL},
 };
 
@@ -38,6 +39,8 @@ int proc_parse_options(char *options, struct pid_namespace *pid)
 	char *p;
 	substring_t args[MAX_OPT_ARGS];
 	int option;
+
+	pid->pidfs = 0;
 
 	if (!options)
 		return 1;
@@ -63,6 +66,9 @@ int proc_parse_options(char *options, struct pid_namespace *pid)
 				return 0;
 			}
 			pid->hide_pid = option;
+			break;
+		case Opt_pidfs:
+			pid->pidfs = 1;
 			break;
 		default:
 			pr_err("proc: unrecognized mount option \"%s\" "
@@ -158,18 +164,27 @@ static int proc_root_getattr(struct vfsmount *mnt, struct dentry *dentry, struct
 
 static struct dentry *proc_root_lookup(struct inode * dir, struct dentry * dentry, unsigned int flags)
 {
+	struct pid_namespace *ns = dentry->d_sb->s_fs_info;
+
+	if (ns->pidfs)
+		return proc_pid_lookup(dir, dentry, flags);
+
 	if (!proc_pid_lookup(dir, dentry, flags))
 		return NULL;
-	
+
 	return proc_lookup(dir, dentry, flags);
 }
 
 static int proc_root_readdir(struct file *file, struct dir_context *ctx)
 {
+	struct pid_namespace *ns = file_inode(file)->i_sb->s_fs_info;
+
 	if (ctx->pos < FIRST_PROCESS_ENTRY) {
-		int error = proc_readdir(file, ctx);
-		if (unlikely(error <= 0))
-			return error;
+		if (!ns->pidfs) {
+			int error = proc_readdir(file, ctx);
+			if (unlikely(error <= 0))
+				return error;
+		}
 		ctx->pos = FIRST_PROCESS_ENTRY;
 	}
 
