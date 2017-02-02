@@ -474,11 +474,15 @@ struct inode *proc_get_inode(struct super_block *sb, struct proc_dir_entry *de)
 int proc_fill_super(struct super_block *s, void *data, int silent)
 {
 	struct pid_namespace *ns = get_pid_ns(s->s_fs_info);
+	struct proc_dir_entry *fs_root = &proc_root;
 	struct inode *root_inode;
 	int ret;
 
 	if (!proc_parse_options(data, ns))
 		return -EINVAL;
+
+	if (IS_ENABLED(CONFIG_PROC_PIDFS) && s->s_type == &pidfs_fs_type)
+		fs_root = &pidfs_root;
 
 	/* User space would break if executables or devices appear on proc */
 	s->s_iflags |= SB_I_USERNS_VISIBLE | SB_I_NOEXEC | SB_I_NODEV;
@@ -496,8 +500,8 @@ int proc_fill_super(struct super_block *s, void *data, int silent)
 	 */
 	s->s_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;
 	
-	pde_get(&proc_root);
-	root_inode = proc_get_inode(s, &proc_root);
+	pde_get(fs_root);
+	root_inode = proc_get_inode(s, fs_root);
 	if (!root_inode) {
 		pr_err("proc_fill_super: get root inode failed\n");
 		return -ENOMEM;
