@@ -260,7 +260,14 @@ static inline void proc_tty_init(void) {}
 /*
  * root.c
  */
+struct proc_options {
+	kgid_t pid_gid;
+	int hide_pid;
+	int pid_only;
+};
+
 extern struct proc_dir_entry proc_root;
+extern struct proc_dir_entry pidfs_root;
 extern int proc_parse_options(char *options, struct pid_namespace *pid);
 
 extern void proc_self_init(void);

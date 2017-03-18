@@ -26,16 +26,17 @@
 #include "internal.h"
 
 enum {
-	Opt_gid, Opt_hidepid, Opt_err,
+	Opt_gid, Opt_hidepid, Opt_pidonly, Opt_err,
 };
 
 static const match_table_t tokens = {
 	{Opt_hidepid, "hidepid=%u"},
 	{Opt_gid, "gid=%u"},
+	{Opt_pidonly, "pidonly"},
 	{Opt_err, NULL},
 };
 
-int proc_parse_options(char *options, struct pid_namespace *pid)
+static int proc_fill_options(char *options, struct proc_options *fs_opts)
 {
 	char *p;
 	substring_t args[MAX_OPT_ARGS];
@@ -55,7 +56,7 @@ int proc_parse_options(char *options, struct pid_namespace *pid)
 		case Opt_gid:
 			if (match_int(&args[0], &option))
 				return 0;
-			pid->pid_gid = make_kgid(current_user_ns(), option);
+			fs_opts->pid_gid = make_kgid(current_user_ns(), option);
 			break;
 		case Opt_hidepid:
 			if (match_int(&args[0], &option))
@@ -65,7 +66,10 @@ int proc_parse_options(char *options, struct pid_namespace *pid)
 				pr_err("proc: hidepid value must be between 0 and 2.\n");
 				return 0;
 			}
-			pid->hide_pid = option;
+			fs_opts->hide_pid = option;
+			break;
+		case Opt_pidonly:
+			fs_opts->pid_only = 1;
 			break;
 		default:
 			pr_err("proc: unrecognized mount option \"%s\" "
@@ -75,6 +79,72 @@ int proc_parse_options(char *options, struct pid_namespace *pid)
 	}
 
 	return 1;
+}
+
+int proc_parse_options(char *options, struct pid_namespace *pid)
+{
+	struct proc_options opts = { 0 };
+
+	if (!proc_fill_options(options, &opts))
+		return 0;
+
+	pid->pid_gid = opts.pid_gid;
+	pid->hide_pid = opts.hide_pid;
+
+	return 1;
+}
+
+static int pidfs_register_dir(struct dentry *root, char *name, struct inode *inode)
+{
+	struct inode *root_inode = d_inode(root);
+	struct dentry *child;
+
+	inode_lock(root_inode);
+	child = d_alloc_name(root, name);
+	if (child) {
+		d_add(child, inode);
+	} else {
+		child = ERR_PTR(-ENOMEM);
+	}
+	inode_unlock(root_inode);
+	if (IS_ERR(child)) {
+		pr_err("pidfs_register_dir: can't allocate /pidfs/%s\n", name);
+		return PTR_ERR(child);
+	}
+	return 0;
+}
+
+static int fill_pidfs_root(struct super_block *s)
+{
+	struct pid_namespace *ns = get_pid_ns(s->s_fs_info);
+	struct inode *root_inode;
+	struct dentry *root;
+	int ret;
+
+	pde_get(&pidfs_root);
+	root_inode = proc_get_inode(s, &pidfs_root);
+	if (!root_inode) {
+		pr_err("pidfs_fill_root: get root inode failed\n");
+		return -ENOMEM;
+	}
+
+	root = d_make_root(root_inode);
+	if (!root) {
+		pr_err("pidfs_fill_root: allocate dentry failed\n");
+		return -ENOMEM;
+	}
+
+	ret = pidfs_register_dir(root, "self", d_inode(ns->proc_self));
+	if (ret)
+		return ret;
+
+	ret = pidfs_register_dir(root, "thread-self", d_inode(ns->proc_thread_self));
+	if (ret)
+		return ret;
+
+	ns->pidfs = root;
+
+	return 0;
 }
 
 int proc_remount(struct super_block *sb, int *flags, char *data)
@@ -89,6 +159,8 @@ static struct dentry *proc_mount(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data)
 {
 	struct pid_namespace *ns;
+	static struct dentry *root;
+	struct proc_options opts = { 0 };
 
 	if (flags & MS_KERNMOUNT) {
 		ns = data;
@@ -97,7 +169,23 @@ static struct dentry *proc_mount(struct file_system_type *fs_type,
 		ns = task_active_pid_ns(current);
 	}
 
-	return mount_ns(fs_type, flags, data, ns, ns->user_ns, proc_fill_super);
+	root = mount_ns(fs_type, flags, data, ns, ns->user_ns, proc_fill_super);
+
+	if (!IS_ERR(root)) {
+		if (!proc_fill_options(data, &opts))
+			return ERR_PTR(-EINVAL);
+
+		if (opts.pid_only) {
+			int ret;
+
+			if (!ns->pidfs && (ret = fill_pidfs_root(root->d_sb)))
+				return ERR_PTR(ret);
+
+			root = ns->pidfs;
+		}
+	}
+
+	return root;
 }
 
 static void proc_kill_sb(struct super_block *sb)
@@ -109,6 +197,8 @@ static void proc_kill_sb(struct super_block *sb)
 		dput(ns->proc_self);
 	if (ns->proc_thread_self)
 		dput(ns->proc_thread_self);
+	if (ns->pidfs)
+		dput(ns->pidfs);
 	kill_anon_super(sb);
 	put_pid_ns(ns);
 }
@@ -212,6 +302,19 @@ struct proc_dir_entry proc_root = {
 	.parent		= &proc_root,
 	.subdir		= RB_ROOT,
 	.name		= "/proc",
+};
+
+struct proc_dir_entry pidfs_root = {
+	.low_ino	= PROC_ROOT_INO,
+	.namelen	= 5,
+	.mode		= S_IFDIR | S_IRUGO | S_IXUGO,
+	.nlink		= 2,
+	.count		= ATOMIC_INIT(1),
+	.proc_iops	= &proc_root_inode_operations,
+	.proc_fops	= &proc_root_operations,
+	.parent		= &pidfs_root,
+	.subdir		= RB_ROOT,
+	.name		= "/pidfs",
 };
 
 int pid_ns_prepare_proc(struct pid_namespace *ns)

@@ -23,6 +23,7 @@
 #include <linux/spinlock.h>
 #include <linux/completion.h>
 #include <linux/uaccess.h>
+#include <linux/pid_namespace.h>
 
 #include "internal.h"
 
@@ -307,6 +308,10 @@ int proc_readdir_de(struct proc_dir_entry *de, struct file *file,
 int proc_readdir(struct file *file, struct dir_context *ctx)
 {
 	struct inode *inode = file_inode(file);
+	struct pid_namespace *ns = inode->i_sb->s_fs_info;
+
+	if (ns->pidfs && inode == d_inode(ns->pidfs))
+		return 1;
 
 	return proc_readdir_de(PDE(inode), file, ctx);
 }
