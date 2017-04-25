@@ -7,6 +7,10 @@
 #include <linux/types.h>
 #include <linux/fs.h>
 #include <linux/refcount.h>
+#include <linux/pid_namespace.h>
+
+struct proc_dir_entry;
+struct pid_namespace;
 
 struct proc_fs_info {
 	struct pid_namespace *pid_ns;
@@ -14,13 +18,31 @@ struct proc_fs_info {
 	struct dentry *proc_thread_self; /* For /proc/thread-self/ */
 };
 
-struct proc_dir_entry;
-
 #ifdef CONFIG_PROC_FS
 
 static inline struct proc_fs_info *proc_sb(struct super_block *sb)
 {
 	return sb->s_fs_info;
+}
+
+static inline void proc_fs_set_hide_pid(struct proc_fs_info *fs_info, int hide_pid)
+{
+	fs_info->pid_ns->hide_pid = hide_pid;
+}
+
+static inline void proc_fs_set_pid_gid(struct proc_fs_info *fs_info, kgid_t gid)
+{
+	fs_info->pid_ns->pid_gid = gid;
+}
+
+static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
+{
+	return fs_info->pid_ns->hide_pid;
+}
+
+static inline kgid_t proc_fs_pid_gid(struct proc_fs_info *fs_info)
+{
+	return fs_info->pid_ns->pid_gid;
 }
 
 extern void proc_root_init(void);
@@ -63,6 +85,24 @@ static inline void proc_root_init(void)
 
 static inline void proc_flush_task(struct task_struct *task)
 {
+}
+
+static inline void proc_fs_set_hide_pid(struct proc_fs_info *fs_info, int hide_pid)
+{
+}
+
+static inline void proc_fs_set_pid_gid(struct proc_info_fs *fs_info, kgid_t gid)
+{
+}
+
+static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
+{
+	return 0;
+}
+
+extern kgid_t proc_fs_pid_gid(struct proc_fs_info *fs_info)
+{
+	return GLOBAL_ROOT_GID;
 }
 
 extern inline struct proc_fs_info *proc_sb(struct super_block *sb) { return NULL;}

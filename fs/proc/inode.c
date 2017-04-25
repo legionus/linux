@@ -475,11 +475,12 @@ struct inode *proc_get_inode(struct super_block *sb, struct proc_dir_entry *de)
 int proc_fill_super(struct super_block *s, void *data, int silent)
 {
 	struct proc_fs_info *fs_info = proc_sb(s);
-	struct pid_namespace *ns = get_pid_ns(fs_info->pid_ns);
 	struct inode *root_inode;
 	int ret;
 
-	if (!proc_parse_options(data, ns))
+	get_pid_ns(fs_info->pid_ns);
+
+	if (!proc_parse_options(data, fs_info))
 		return -EINVAL;
 
 	/* User space would break if executables or devices appear on proc */
