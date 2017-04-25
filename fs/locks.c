@@ -2580,7 +2580,8 @@ static void lock_get_status(struct seq_file *f, struct file_lock *fl,
 	unsigned int fl_pid;
 
 	if (fl->fl_nspid) {
-		struct pid_namespace *proc_pidns = file_inode(f->file)->i_sb->s_fs_info;
+		struct proc_fs_info *fs_info = proc_sb(file_inode(f->file)->i_sb);
+		struct pid_namespace *proc_pidns = fs_info->pid_ns;
 
 		/* Don't let fl_pid change based on who is reading the file */
 		fl_pid = pid_nr_ns(fl->fl_nspid, proc_pidns);
@@ -2664,7 +2665,8 @@ static int locks_show(struct seq_file *f, void *v)
 {
 	struct locks_iterator *iter = f->private;
 	struct file_lock *fl, *bfl;
-	struct pid_namespace *proc_pidns = file_inode(f->file)->i_sb->s_fs_info;
+	struct proc_fs_info *fs_info = proc_sb(file_inode(f->file)->i_sb);
+	struct pid_namespace *proc_pidns = fs_info->pid_ns;
 
 	fl = hlist_entry(v, struct file_lock, fl_link);
 

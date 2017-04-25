@@ -6,10 +6,20 @@
 
 #include <linux/types.h>
 #include <linux/fs.h>
+#include <linux/refcount.h>
+
+struct proc_fs_info {
+	struct pid_namespace *pid_ns;
+};
 
 struct proc_dir_entry;
 
 #ifdef CONFIG_PROC_FS
+
+static inline struct proc_fs_info *proc_sb(struct super_block *sb)
+{
+	return sb->s_fs_info;
+}
 
 extern void proc_root_init(void);
 extern void proc_flush_task(struct task_struct *);
@@ -53,6 +63,7 @@ static inline void proc_flush_task(struct task_struct *task)
 {
 }
 
+extern inline struct proc_fs_info *proc_sb(struct super_block *sb) { return NULL;}
 static inline struct proc_dir_entry *proc_symlink(const char *name,
 		struct proc_dir_entry *parent,const char *dest) { return NULL;}
 static inline struct proc_dir_entry *proc_mkdir(const char *name,
