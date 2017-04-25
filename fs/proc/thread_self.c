@@ -36,7 +36,6 @@ static unsigned thread_self_inum;
 int proc_setup_thread_self(struct super_block *s)
 {
 	struct proc_fs_info *fs_info = proc_sb(s);
-	struct pid_namespace *ns = fs_info->pid_ns;
 	struct inode *root_inode = d_inode(s->s_root);
 	struct dentry *thread_self;
 
@@ -61,10 +60,10 @@ int proc_setup_thread_self(struct super_block *s)
 	}
 	inode_unlock(root_inode);
 	if (IS_ERR(thread_self)) {
-		pr_err("proc_fill_super: can't allocate /proc/thread_self\n");
+		pr_err("proc_fill_super: can't allocate /proc/thread-self\n");
 		return PTR_ERR(thread_self);
 	}
-	ns->proc_thread_self = thread_self;
+	fs_info->proc_thread_self = thread_self;
 	return 0;
 }
 
