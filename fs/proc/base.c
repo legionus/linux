@@ -685,13 +685,22 @@ static bool has_pid_permissions(struct proc_fs_info *fs_info,
 				 struct task_struct *task,
 				 int hide_pid_min)
 {
-	int hide_pid = proc_fs_hide_pid(fs_info);
-	kgid_t gid = proc_fs_pid_gid(fs_info);
+	int limit_pids = proc_fs_limit_pids(fs_info);
 
-	if (hide_pid < hide_pid_min)
-		return true;
-	if (in_group_p(gid))
-		return true;
+	/*
+	 * If 'limit_pids' mount is set force a ptrace check,
+	 * we indicate that we are using a filesystem syscall
+	 * by passing PTRACE_MODE_READ_FSCREDS
+	 */
+	if (limit_pids == PROC_LIMIT_PIDS_OFF) {
+		int hide_pid = proc_fs_hide_pid(fs_info);
+		kgid_t gid = proc_fs_pid_gid(fs_info);
+
+		if (hide_pid < hide_pid_min)
+			return true;
+		if (in_group_p(gid))
+			return true;
+	}
 	return ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS);
 }
 

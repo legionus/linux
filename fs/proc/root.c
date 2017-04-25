@@ -27,14 +27,65 @@
 #include "internal.h"
 
 enum {
-	Opt_gid, Opt_hidepid, Opt_err,
+	Opt_gid, Opt_hidepid, Opt_limit_pids, Opt_err,
 };
 
 static const match_table_t tokens = {
 	{Opt_hidepid, "hidepid=%u"},
 	{Opt_gid, "gid=%u"},
+	{Opt_limit_pids, "limit_pids=%u"},
 	{Opt_err, NULL},
 };
+
+/* We only parse 'limit_pids' option here */
+int proc_parse_early_options(char *options, struct proc_fs_info *fs_info)
+{
+	char *p, *opts, *orig;
+	substring_t args[MAX_OPT_ARGS];
+	int option, ret;
+
+	if (!options)
+		return 0;
+
+	opts = kstrdup(options, GFP_KERNEL);
+	if (!opts)
+		return -ENOMEM;
+
+	orig = opts;
+
+	while ((p = strsep(&opts, ",")) != NULL) {
+		int token;
+
+		if (!*p)
+			continue;
+
+		token = match_token(p, tokens, args);
+		switch (token) {
+		case Opt_limit_pids:
+			if (match_int(&args[0], &option))
+				return -EINVAL;
+			ret = proc_fs_set_limit_pids(fs_info, option);
+			if (ret < 0) {
+				pr_err("proc: faild to parse mount option "
+				       "\"%s\" \n", p);
+				return ret;
+			}
+			proc_fs_set_newinstance(fs_info, true);
+			pr_info("proc: mounting a new procfs instance ");
+			break;
+		case Opt_gid:
+		case Opt_hidepid:
+			break;
+		default:
+			pr_err("proc: unrecognized mount option \"%s\" "
+			       "or missing value\n", p);
+			return -EINVAL;
+		}
+	}
+
+	kfree(orig);
+	return 0;
+}
 
 int proc_parse_options(char *options, struct proc_fs_info *fs_info)
 {
@@ -74,6 +125,8 @@ int proc_parse_options(char *options, struct proc_fs_info *fs_info)
 			}
 			proc_fs_set_hide_pid(fs_info, option);
 			break;
+		case Opt_limit_pids:
+			break;
 		default:
 			pr_err("proc: unrecognized mount option \"%s\" "
 			       "or missing value\n", p);
@@ -86,18 +139,34 @@ int proc_parse_options(char *options, struct proc_fs_info *fs_info)
 
 int proc_remount(struct super_block *sb, int *flags, char *data)
 {
+	int error;
 	struct proc_fs_info *fs_info = proc_sb(sb);
 
 	sync_filesystem(sb);
+
+	/*
+	 * If this is a new instance, then parse again the proc mount
+	 * options.
+	 */
+	if (proc_fs_newinstance(fs_info)) {
+		error = proc_parse_early_options(data, fs_info);
+		if (error < 0)
+			return error;
+	}
+
 	return !proc_parse_options(data, fs_info);
 }
 
-static int proc_test_super(struct super_block *s, void *data)
+static int proc_test_super(struct super_block *sb, void *data)
 {
 	struct proc_fs_info *p = data;
-	struct proc_fs_info *fs_info = proc_sb(s);
+	struct proc_fs_info *fs_info = proc_sb(sb);
 
-	return p->pid_ns == fs_info->pid_ns;
+	if (!proc_fs_newinstance(p) && !proc_fs_newinstance(fs_info) &&
+	    p->pid_ns == fs_info->pid_ns)
+		return 1;
+
+	return 0;
 }
 
 static int proc_set_super(struct super_block *sb, void *data)
@@ -109,7 +178,7 @@ static int proc_set_super(struct super_block *sb, void *data)
 static struct dentry *proc_mount(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data)
 {
-	int error;
+	int error = 0;
 	struct super_block *sb;
 	struct pid_namespace *ns;
 	struct proc_fs_info *fs_info;
@@ -125,10 +194,19 @@ static struct dentry *proc_mount(struct file_system_type *fs_type,
 	if (!fs_info)
 		return ERR_PTR(-ENOMEM);
 
+	/* Set it as early as possible */
+	proc_fs_set_newinstance(fs_info, false);
+	proc_fs_set_limit_pids(fs_info, PROC_LIMIT_PIDS_OFF);
+
 	if (flags & MS_KERNMOUNT) {
 		ns = data;
 		data = NULL;
 	} else {
+		/* Parse early mount options if not a MS_KERNMOUNT */
+		error = proc_parse_early_options(data, fs_info);
+		if (error < 0)
+			goto error_fs_info;
+
 		ns = task_active_pid_ns(current);
 	}
 

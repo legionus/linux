@@ -12,10 +12,17 @@
 struct proc_dir_entry;
 struct pid_namespace;
 
+enum { /* definitions for proc mount option limit_pids */
+	PROC_LIMIT_PIDS_OFF	= 0,	/* Limit pids is off */
+	PROC_LIMIT_PIDS_PTRACE	= 1,	/* Limit pids to only ptracable pids */
+};
+
 struct proc_fs_info {
 	struct pid_namespace *pid_ns;
 	struct dentry *proc_self; /* For /proc/self */
 	struct dentry *proc_thread_self; /* For /proc/thread-self/ */
+	bool newinstance; /* Private flag for new separated instances */
+	int limit_pids:1;
 };
 
 #ifdef CONFIG_PROC_FS
@@ -35,6 +42,21 @@ static inline void proc_fs_set_pid_gid(struct proc_fs_info *fs_info, kgid_t gid)
 	fs_info->pid_ns->pid_gid = gid;
 }
 
+static inline void proc_fs_set_newinstance(struct proc_fs_info *fs_info, bool value)
+{
+	fs_info->newinstance = value;
+}
+
+static inline int proc_fs_set_limit_pids(struct proc_fs_info *fs_info, int value)
+{
+	if (value < PROC_LIMIT_PIDS_OFF || value > PROC_LIMIT_PIDS_PTRACE)
+		return -EINVAL;
+
+	fs_info->limit_pids = value;
+
+	return 0;
+}
+
 static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
 {
 	return fs_info->pid_ns->hide_pid;
@@ -43,6 +65,16 @@ static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
 static inline kgid_t proc_fs_pid_gid(struct proc_fs_info *fs_info)
 {
 	return fs_info->pid_ns->pid_gid;
+}
+
+static inline bool proc_fs_newinstance(struct proc_fs_info *fs_info)
+{
+	return fs_info->newinstance;
+}
+
+static inline int proc_fs_limit_pids(struct proc_fs_info *fs_info)
+{
+	return fs_info->limit_pids;
 }
 
 extern void proc_root_init(void);
@@ -95,6 +127,15 @@ static inline void proc_fs_set_pid_gid(struct proc_info_fs *fs_info, kgid_t gid)
 {
 }
 
+static inline void proc_fs_set_newinstance(struct proc_fs_info *fs_info, bool value)
+{
+}
+
+static inline int proc_fs_set_limit_pids(struct proc_fs_info *fs_info, int value)
+{
+	return 0;
+}
+
 static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
 {
 	return 0;
@@ -103,6 +144,16 @@ static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
 extern kgid_t proc_fs_pid_gid(struct proc_fs_info *fs_info)
 {
 	return GLOBAL_ROOT_GID;
+}
+
+static inline bool proc_fs_newinstance(struct proc_fs_info *fs_info)
+{
+	return false;
+}
+
+static inline int proc_fs_limit_pids(struct proc_fs_info *fs_info)
+{
+	return 0;
 }
 
 extern inline struct proc_fs_info *proc_sb(struct super_block *sb) { return NULL;}
