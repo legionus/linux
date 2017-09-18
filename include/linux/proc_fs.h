@@ -18,6 +18,11 @@ enum { /* definitions for proc mount option limit_pids */
 	PROC_LIMIT_PIDS_PTRACE	= 1,	/* Limit pids to only ptracable pids */
 };
 
+enum {
+	PROC_PIDONLY_OFF = 0,
+	PROC_PIDONLY_ON = 1,
+};
+
 struct proc_fs_info {
 	struct super_block *sb;
 	struct pid_namespace *pid_ns;
@@ -26,6 +31,7 @@ struct proc_fs_info {
 	struct dentry *proc_thread_self; /* For /proc/thread-self/ */
 	bool newinstance; /* Private flag for new separated instances */
 	int limit_pids:1;
+	int pidonly:1;
 };
 
 #ifdef CONFIG_PROC_FS
@@ -60,6 +66,16 @@ static inline int proc_fs_set_limit_pids(struct proc_fs_info *fs_info, int value
 	return 0;
 }
 
+static inline int proc_fs_set_pidonly(struct proc_fs_info *fs_info, int value)
+{
+	if (value != PROC_PIDONLY_ON && value != PROC_PIDONLY_OFF)
+		return -EINVAL;
+
+	fs_info->pidonly = value;
+
+	return 0;
+}
+
 static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
 {
 	return fs_info->pid_ns->hide_pid;
@@ -78,6 +94,11 @@ static inline bool proc_fs_newinstance(struct proc_fs_info *fs_info)
 static inline int proc_fs_limit_pids(struct proc_fs_info *fs_info)
 {
 	return fs_info->limit_pids;
+}
+
+static inline int proc_fs_pidonly(struct proc_fs_info *fs_info)
+{
+	return fs_info->pidonly;
 }
 
 extern void proc_root_init(void);

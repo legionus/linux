@@ -125,6 +125,9 @@ static int proc_show_options(struct seq_file *seq, struct dentry *root)
 	if (limit_pids > PROC_LIMIT_PIDS_OFF)
 		seq_printf(seq, ",limit_pids=%u", limit_pids);
 
+	if (proc_fs_pidonly(fs_info))
+		seq_printf(seq, ",pidonly");
+
 	return 0;
 }
 
@@ -338,11 +341,15 @@ proc_reg_get_unmapped_area(struct file *file, unsigned long orig_addr,
 
 static int proc_reg_open(struct inode *inode, struct file *file)
 {
+	struct proc_fs_info *fs_info = proc_sb(inode->i_sb);
 	struct proc_dir_entry *pde = PDE(inode);
 	int rv = 0;
 	int (*open)(struct inode *, struct file *);
 	int (*release)(struct inode *, struct file *);
 	struct pde_opener *pdeo;
+
+	if (proc_fs_pidonly(fs_info))
+		return -ENOENT;
 
 	/*
 	 * Ensure that

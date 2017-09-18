@@ -28,17 +28,18 @@
 #include "internal.h"
 
 enum {
-	Opt_gid, Opt_hidepid, Opt_limit_pids, Opt_err,
+	Opt_gid, Opt_hidepid, Opt_limit_pids, Opt_pidonly, Opt_err,
 };
 
 static const match_table_t tokens = {
 	{Opt_hidepid, "hidepid=%u"},
 	{Opt_gid, "gid=%u"},
 	{Opt_limit_pids, "limit_pids=%u"},
+	{Opt_pidonly, "pidonly"},
 	{Opt_err, NULL},
 };
 
-/* We only parse 'limit_pids' option here */
+/* We only parse 'limit_pids' and 'pidonly' option here */
 int proc_parse_early_options(char *options, struct proc_fs_info *fs_info)
 {
 	char *p, *opts, *orig;
@@ -71,6 +72,11 @@ int proc_parse_early_options(char *options, struct proc_fs_info *fs_info)
 				       "\"%s\" \n", p);
 				return ret;
 			}
+			proc_fs_set_newinstance(fs_info, true);
+			pr_info("proc: mounting a new procfs instance ");
+			break;
+		case Opt_pidonly:
+			proc_fs_set_pidonly(fs_info, PROC_PIDONLY_ON);
 			proc_fs_set_newinstance(fs_info, true);
 			pr_info("proc: mounting a new procfs instance ");
 			break;
@@ -126,6 +132,7 @@ int proc_parse_options(char *options, struct proc_fs_info *fs_info)
 			}
 			proc_fs_set_hide_pid(fs_info, option);
 			break;
+		case Opt_pidonly:
 		case Opt_limit_pids:
 			break;
 		default:
@@ -198,6 +205,7 @@ static struct dentry *proc_mount(struct file_system_type *fs_type,
 	/* Set it as early as possible */
 	proc_fs_set_newinstance(fs_info, false);
 	proc_fs_set_limit_pids(fs_info, PROC_LIMIT_PIDS_OFF);
+	proc_fs_set_pidonly(fs_info, PROC_PIDONLY_OFF);
 
 	if (flags & SB_KERNMOUNT) {
 		ns = data;
