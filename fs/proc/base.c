@@ -700,7 +700,7 @@ static bool has_pid_permissions(struct proc_fs_info *fs_info,
 static int proc_pid_permission(struct inode *inode, int mask)
 {
 	struct proc_fs_info *fs_info = proc_sb(inode->i_sb);
-	struct pid_namespace *pid = fs_info->pid_ns;
+	int hide_pid = proc_fs_hide_pid(fs_info);
 	struct task_struct *task;
 	bool has_perms;
 
@@ -711,7 +711,7 @@ static int proc_pid_permission(struct inode *inode, int mask)
 	put_task_struct(task);
 
 	if (!has_perms) {
-		if (pid->hide_pid == HIDEPID_INVISIBLE) {
+		if (hide_pid == HIDEPID_INVISIBLE) {
 			/*
 			 * Let's make getdents(), stat(), and open()
 			 * consistent with each other.  If a process

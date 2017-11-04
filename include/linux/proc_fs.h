@@ -16,6 +16,9 @@ struct proc_fs_info {
 	struct pid_namespace *pid_ns;
 	struct dentry *proc_self; /* For /proc/self/ */
 	struct dentry *proc_thread_self; /* For /proc/thread-self/ */
+	bool newinstance; /* Flag for new separated instances */
+	kgid_t pid_gid;
+	int hide_pid;
 };
 
 #ifdef CONFIG_PROC_FS
@@ -27,22 +30,32 @@ static inline struct proc_fs_info *proc_sb(struct super_block *sb)
 
 static inline void proc_fs_set_hide_pid(struct proc_fs_info *fs_info, int hide_pid)
 {
-	fs_info->pid_ns->hide_pid = hide_pid;
+	fs_info->hide_pid = hide_pid;
 }
 
 static inline void proc_fs_set_pid_gid(struct proc_fs_info *fs_info, kgid_t gid)
 {
-	fs_info->pid_ns->pid_gid = gid;
+	fs_info->pid_gid = gid;
+}
+
+static inline void proc_fs_set_newinstance(struct proc_fs_info *fs_info, bool value)
+{
+	fs_info->newinstance = value;
 }
 
 static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
 {
-	return fs_info->pid_ns->hide_pid;
+	return fs_info->hide_pid;
 }
 
 static inline kgid_t proc_fs_pid_gid(struct proc_fs_info *fs_info)
 {
-	return fs_info->pid_ns->pid_gid;
+	return fs_info->pid_gid;
+}
+
+static inline bool proc_fs_newinstance(struct proc_fs_info *fs_info)
+{
+	return fs_info->newinstance;
 }
 
 extern void proc_root_init(void);
@@ -89,6 +102,10 @@ static inline void proc_fs_set_pid_gid(struct proc_info_fs *fs_info, kgid_t gid)
 {
 }
 
+static inline void proc_fs_set_newinstance(struct proc_fs_info *fs_info, bool value)
+{
+}
+
 static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
 {
 	return 0;
@@ -97,6 +114,11 @@ static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
 extern kgid_t proc_fs_pid_gid(struct proc_fs_info *fs_info)
 {
 	return GLOBAL_ROOT_GID;
+}
+
+static inline bool proc_fs_newinstance(struct proc_fs_info *fs_info)
+{
+	return false;
 }
 
 extern inline struct proc_fs_info *proc_sb(struct super_block *sb) { return NULL;}
