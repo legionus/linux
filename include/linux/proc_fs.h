@@ -12,6 +12,12 @@
 struct proc_dir_entry;
 struct pid_namespace;
 
+enum { /* definitions for 'hidepid' mount option */
+	HIDEPID_OFF	  = 0,
+	HIDEPID_NO_ACCESS = 1,
+	HIDEPID_INVISIBLE = 2,
+};
+
 struct proc_fs_info {
 	struct pid_namespace *pid_ns;
 	struct dentry *proc_self; /* For /proc/self/ */
