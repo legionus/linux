@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_SLAB_DEF_H
 #define	_LINUX_SLAB_DEF_H
 
@@ -83,6 +84,9 @@ struct kmem_cache {
 #ifdef CONFIG_SLAB_FREELIST_RANDOM
 	unsigned int *random_seq;
 #endif
+
+	size_t useroffset;		/* Usercopy region offset */
+	size_t usersize;		/* Usercopy region size */
 
 	struct kmem_cache_node *node[MAX_NUMNODES];
 };

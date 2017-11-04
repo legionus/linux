@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
   Generic support for BUG()
 
@@ -194,4 +195,25 @@ enum bug_trap_type report_bug(unsigned long bugaddr, struct pt_regs *regs)
 			(void *)bugaddr);
 
 	return BUG_TRAP_TYPE_BUG;
+}
+
+static void clear_once_table(struct bug_entry *start, struct bug_entry *end)
+{
+	struct bug_entry *bug;
+
+	for (bug = start; bug < end; bug++)
+		bug->flags &= ~BUGFLAG_ONCE;
+}
+
+void generic_bug_clear_once(void)
+{
+	struct module *mod;
+
+	rcu_read_lock_sched();
+	list_for_each_entry_rcu(mod, &module_bug_list, bug_list)
+		clear_once_table(mod->bug_table,
+				 mod->bug_table + mod->num_bugs);
+	rcu_read_unlock_sched();
+
+	clear_once_table(__start___bug_table, __stop___bug_table);
 }

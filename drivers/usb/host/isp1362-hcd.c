@@ -1578,6 +1578,7 @@ static int isp1362_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 			spin_lock_irqsave(&isp1362_hcd->lock, flags);
 			isp1362_write_reg32(isp1362_hcd, HCRHSTATUS, RH_HS_OCIC);
 			spin_unlock_irqrestore(&isp1362_hcd->lock, flags);
+			break;
 		case C_HUB_LOCAL_POWER:
 			DBG(0, "C_HUB_LOCAL_POWER\n");
 			break;
@@ -2591,7 +2592,7 @@ static int isp1362_hc_start(struct usb_hcd *hcd)
 
 /*-------------------------------------------------------------------------*/
 
-static struct hc_driver isp1362_hc_driver = {
+static const struct hc_driver isp1362_hc_driver = {
 	.description =		hcd_name,
 	.product_desc =		"ISP1362 Host Controller",
 	.hcd_priv_size =	sizeof(struct isp1362_hcd),

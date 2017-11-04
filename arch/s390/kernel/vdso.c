@@ -140,6 +140,20 @@ static void __init vdso_init_data(struct vdso_data *vd)
  */
 #define SEGMENT_ORDER	2
 
+/*
+ * The initial vdso_data structure for the boot CPU. Eventually
+ * it is replaced with a properly allocated structure in vdso_init.
+ * This is necessary because a valid S390_lowcore.vdso_per_cpu_data
+ * pointer is required to be able to return from an interrupt or
+ * program check. See the exit paths in entry.S.
+ */
+struct vdso_data boot_vdso_data __initdata;
+
+void __init vdso_alloc_boot_cpu(struct lowcore *lowcore)
+{
+	lowcore->vdso_per_cpu_data = (unsigned long) &boot_vdso_data;
+}
+
 int vdso_alloc_per_cpu(struct lowcore *lowcore)
 {
 	unsigned long segment_table, page_table, page_frame;
@@ -157,6 +171,8 @@ int vdso_alloc_per_cpu(struct lowcore *lowcore)
 	page_frame = get_zeroed_page(GFP_KERNEL);
 	if (!segment_table || !page_table || !page_frame)
 		goto out;
+	arch_set_page_dat(virt_to_page(segment_table), SEGMENT_ORDER);
+	arch_set_page_dat(virt_to_page(page_table), 0);
 
 	/* Initialize per-cpu vdso data page */
 	vd = (struct vdso_per_cpu_data *) page_frame;
@@ -164,10 +180,8 @@ int vdso_alloc_per_cpu(struct lowcore *lowcore)
 	vd->node_id = cpu_to_node(vd->cpu_nr);
 
 	/* Set up access register mode page table */
-	clear_table((unsigned long *) segment_table, _SEGMENT_ENTRY_EMPTY,
-		    PAGE_SIZE << SEGMENT_ORDER);
-	clear_table((unsigned long *) page_table, _PAGE_INVALID,
-		    256*sizeof(unsigned long));
+	memset64((u64 *)segment_table, _SEGMENT_ENTRY_EMPTY, _CRST_ENTRIES);
+	memset64((u64 *)page_table, _PAGE_INVALID, PTRS_PER_PTE);
 
 	*(unsigned long *) segment_table = _SEGMENT_ENTRY + page_table;
 	*(unsigned long *) page_table = _PAGE_PROTECT + page_frame;

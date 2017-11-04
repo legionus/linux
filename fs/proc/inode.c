@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/proc/inode.c
  *
@@ -103,12 +104,21 @@ void __init proc_init_inodecache(void)
 static int proc_show_options(struct seq_file *seq, struct dentry *root)
 {
 	struct super_block *sb = root->d_sb;
-	struct pid_namespace *pid = sb->s_fs_info;
+	struct proc_fs_info *fs_info = proc_sb(sb);
+	int hide_pid = proc_fs_hide_pid(fs_info);
+	kgid_t pid_gid = proc_fs_pid_gid(fs_info);
 
-	if (!gid_eq(pid->pid_gid, GLOBAL_ROOT_GID))
-		seq_printf(seq, ",gid=%u", from_kgid_munged(&init_user_ns, pid->pid_gid));
-	if (pid->hide_pid != HIDEPID_OFF)
-		seq_printf(seq, ",hidepid=%u", pid->hide_pid);
+	if (proc_fs_newinstance(fs_info)) {
+		int pids = proc_fs_pids(fs_info);
+
+		seq_printf(seq, ",newinstance");
+		seq_printf(seq, ",pids=%s", pids == HIDEPID_OFF ? "all" : "ptraceable");
+	}
+
+	if (!gid_eq(pid_gid, GLOBAL_ROOT_GID))
+		seq_printf(seq, ",gid=%u", from_kgid_munged(current_user_ns(),pid_gid));
+	if (hide_pid != HIDEPID_OFF)
+		seq_printf(seq, ",hidepid=%u", hide_pid);
 
 	return 0;
 }
@@ -473,11 +483,20 @@ struct inode *proc_get_inode(struct super_block *sb, struct proc_dir_entry *de)
 
 int proc_fill_super(struct super_block *s, void *data, int silent)
 {
-	struct pid_namespace *ns = get_pid_ns(s->s_fs_info);
+	struct proc_fs_info *fs_info = proc_sb(s);
+	struct pid_namespace *ns = get_pid_ns(fs_info->pid_ns);
 	struct inode *root_inode;
 	int ret;
 
-	if (!proc_parse_options(data, ns))
+	fs_info->sb = s;
+
+	if (proc_fs_newinstance(fs_info)) {
+		pidns_proc_lock(ns);
+		list_add_tail(&fs_info->pidns_entry, &ns->procfs_mounts);
+		pidns_proc_unlock(ns);
+	}
+
+	if (!proc_parse_options(data, fs_info))
 		return -EINVAL;
 
 	/* User space would break if executables or devices appear on proc */
@@ -495,7 +514,7 @@ int proc_fill_super(struct super_block *s, void *data, int silent)
 	 * top of it
 	 */
 	s->s_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;
-	
+
 	pde_get(&proc_root);
 	root_inode = proc_get_inode(s, &proc_root);
 	if (!root_inode) {

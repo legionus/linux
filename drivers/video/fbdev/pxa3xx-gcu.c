@@ -520,12 +520,8 @@ static void pxa3xx_gcu_debug_timedout(unsigned long ptr)
 	QERROR("Timer DUMP");
 
 	/* init the timer structure */
-	init_timer(&pxa3xx_gcu_debug_timer);
-	pxa3xx_gcu_debug_timer.function = pxa3xx_gcu_debug_timedout;
-	pxa3xx_gcu_debug_timer.data = ptr;
-	pxa3xx_gcu_debug_timer.expires = jiffies + 5*HZ; /* one second */
-
-	add_timer(&pxa3xx_gcu_debug_timer);
+	setup_timer(&pxa3xx_gcu_debug_timer, pxa3xx_gcu_debug_timedout, ptr);
+	mod_timer(&pxa3xx_gcu_debug_timer, jiffies + 5 * HZ);
 }
 
 static void pxa3xx_gcu_init_debug_timer(void)
@@ -626,8 +622,8 @@ static int pxa3xx_gcu_probe(struct platform_device *pdev)
 	/* request the IRQ */
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
-		dev_err(dev, "no IRQ defined\n");
-		return -ENODEV;
+		dev_err(dev, "no IRQ defined: %d\n", irq);
+		return irq;
 	}
 
 	ret = devm_request_irq(dev, irq, pxa3xx_gcu_handle_irq,

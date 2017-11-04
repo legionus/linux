@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * The proc filesystem constants/structures
  */
@@ -6,10 +7,80 @@
 
 #include <linux/types.h>
 #include <linux/fs.h>
+#include <linux/pid_namespace.h>
 
 struct proc_dir_entry;
+struct pid_namespace;
+
+enum { /* definitions for 'hidepid' mount option */
+	HIDEPID_OFF	  = 0,
+	HIDEPID_NO_ACCESS = 1,
+	HIDEPID_INVISIBLE = 2,
+};
+
+struct proc_fs_info {
+	struct super_block *sb;
+	struct pid_namespace *pid_ns;
+	struct list_head pidns_entry; /* Node in procfs_mounts of pidns */
+	struct dentry *proc_self; /* For /proc/self/ */
+	struct dentry *proc_thread_self; /* For /proc/thread-self/ */
+	bool newinstance; /* Flag for new separated instances */
+	kgid_t pid_gid;
+	int hide_pid;
+	int pids;
+};
 
 #ifdef CONFIG_PROC_FS
+
+static inline struct proc_fs_info *proc_sb(struct super_block *sb)
+{
+	return sb->s_fs_info;
+}
+
+static inline void proc_fs_set_hide_pid(struct proc_fs_info *fs_info, int hide_pid)
+{
+	fs_info->hide_pid = hide_pid;
+}
+
+static inline void proc_fs_set_pid_gid(struct proc_fs_info *fs_info, kgid_t gid)
+{
+	fs_info->pid_gid = gid;
+}
+
+static inline void proc_fs_set_newinstance(struct proc_fs_info *fs_info, bool value)
+{
+	fs_info->newinstance = value;
+}
+
+static inline int proc_fs_set_pids(struct proc_fs_info *fs_info, int value)
+{
+	if (value != HIDEPID_OFF &&
+	    (value != HIDEPID_INVISIBLE || !fs_info->newinstance))
+		return -EINVAL;
+
+	fs_info->pids = value;
+	return 0;
+}
+
+static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
+{
+	return fs_info->hide_pid;
+}
+
+static inline kgid_t proc_fs_pid_gid(struct proc_fs_info *fs_info)
+{
+	return fs_info->pid_gid;
+}
+
+static inline bool proc_fs_newinstance(struct proc_fs_info *fs_info)
+{
+	return fs_info->newinstance;
+}
+
+static inline int proc_fs_pids(struct proc_fs_info *fs_info)
+{
+	return fs_info->pids;
+}
 
 extern void proc_root_init(void);
 extern void proc_flush_task(struct task_struct *);
@@ -28,13 +99,7 @@ extern struct proc_dir_entry *proc_create_data(const char *, umode_t,
 					       const struct file_operations *,
 					       void *);
 
-static inline struct proc_dir_entry *proc_create(
-	const char *name, umode_t mode, struct proc_dir_entry *parent,
-	const struct file_operations *proc_fops)
-{
-	return proc_create_data(name, mode, parent, proc_fops, NULL);
-}
-
+struct proc_dir_entry *proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
 extern void proc_set_size(struct proc_dir_entry *, loff_t);
 extern void proc_set_user(struct proc_dir_entry *, kuid_t, kgid_t);
 extern void *PDE_DATA(const struct inode *);
@@ -53,6 +118,43 @@ static inline void proc_flush_task(struct task_struct *task)
 {
 }
 
+static inline void proc_fs_set_hide_pid(struct proc_fs_info *fs_info, int hide_pid)
+{
+}
+
+static inline void proc_fs_set_pid_gid(struct proc_info_fs *fs_info, kgid_t gid)
+{
+}
+
+static inline void proc_fs_set_newinstance(struct proc_fs_info *fs_info, bool value)
+{
+}
+
+static inline int proc_fs_set_pids(struct proc_fs_info *fs_info, int value)
+{
+}
+
+static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
+{
+	return 0;
+}
+
+extern kgid_t proc_fs_pid_gid(struct proc_fs_info *fs_info)
+{
+	return GLOBAL_ROOT_GID;
+}
+
+static inline bool proc_fs_newinstance(struct proc_fs_info *fs_info)
+{
+	return false;
+}
+
+static inline int proc_fs_pids(struct proc_fs_info *fs_info)
+{
+	return 0;
+}
+
+extern inline struct proc_fs_info *proc_sb(struct super_block *sb) { return NULL;}
 static inline struct proc_dir_entry *proc_symlink(const char *name,
 		struct proc_dir_entry *parent,const char *dest) { return NULL;}
 static inline struct proc_dir_entry *proc_mkdir(const char *name,

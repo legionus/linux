@@ -46,12 +46,12 @@
  */
 
 #define DEBUG_SUBSYSTEM S_LDLM
-#include "../../include/linux/libcfs/libcfs.h"
-#include "../include/lustre_dlm.h"
-#include "../include/obd_support.h"
-#include "../include/obd.h"
-#include "../include/obd_class.h"
-#include "../include/lustre_lib.h"
+#include <linux/libcfs/libcfs.h>
+#include <lustre_dlm.h>
+#include <obd_support.h>
+#include <obd.h>
+#include <obd_class.h>
+#include <lustre_lib.h>
 #include "ldlm_internal.h"
 
 /* When a lock is cancelled by a client, the KMS may undergo change if this
@@ -207,7 +207,8 @@ void ldlm_extent_add_lock(struct ldlm_resource *res,
 				continue;
 			if (ldlm_extent_overlap(&lck->l_req_extent,
 						&lock->l_req_extent)) {
-				CDEBUG(D_ERROR, "granting conflicting lock %p %p\n",
+				CDEBUG(D_ERROR,
+				       "granting conflicting lock %p %p\n",
 				       lck, lock);
 				ldlm_resource_dump(D_ERROR, res);
 				LBUG();

@@ -1074,6 +1074,12 @@ void kvm_s390_vcpu_wakeup(struct kvm_vcpu *vcpu)
 	 * in kvm_vcpu_block without having the waitqueue set (polling)
 	 */
 	vcpu->valid_wakeup = true;
+	/*
+	 * This is mostly to document, that the read in swait_active could
+	 * be moved before other stores, leading to subtle races.
+	 * All current users do not store or use an atomic like update
+	 */
+	smp_mb__after_atomic();
 	if (swait_active(&vcpu->wq)) {
 		/*
 		 * The vcpu gave up the cpu voluntarily, mark it as a good
@@ -2479,14 +2485,15 @@ void kvm_s390_reinject_machine_check(struct kvm_vcpu *vcpu,
 	struct kvm_s390_mchk_info *mchk;
 	union mci mci;
 	__u64 cr14 = 0;         /* upper bits are not used */
+	int rc;
 
 	mci.val = mcck_info->mcic;
 	if (mci.sr)
-		cr14 |= MCCK_CR14_RECOVERY_SUB_MASK;
+		cr14 |= CR14_RECOVERY_SUBMASK;
 	if (mci.dg)
-		cr14 |= MCCK_CR14_DEGRAD_SUB_MASK;
+		cr14 |= CR14_DEGRADATION_SUBMASK;
 	if (mci.w)
-		cr14 |= MCCK_CR14_WARN_SUB_MASK;
+		cr14 |= CR14_WARNING_SUBMASK;
 
 	mchk = mci.ck ? &inti.mchk : &irq.u.mchk;
 	mchk->cr14 = cr14;
@@ -2496,12 +2503,13 @@ void kvm_s390_reinject_machine_check(struct kvm_vcpu *vcpu,
 	if (mci.ck) {
 		/* Inject the floating machine check */
 		inti.type = KVM_S390_MCHK;
-		WARN_ON_ONCE(__inject_vm(vcpu->kvm, &inti));
+		rc = __inject_vm(vcpu->kvm, &inti);
 	} else {
 		/* Inject the machine check to specified vcpu */
 		irq.type = KVM_S390_MCHK;
-		WARN_ON_ONCE(kvm_s390_inject_vcpu(vcpu, &irq));
+		rc = kvm_s390_inject_vcpu(vcpu, &irq);
 	}
+	WARN_ON_ONCE(rc);
 }
 
 int kvm_set_routing_entry(struct kvm *kvm,

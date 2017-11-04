@@ -149,12 +149,6 @@ extern void		    audit_log_key(struct audit_buffer *ab,
 extern void		    audit_log_link_denied(const char *operation,
 						  const struct path *link);
 extern void		    audit_log_lost(const char *message);
-#ifdef CONFIG_SECURITY
-extern void 		    audit_log_secctx(struct audit_buffer *ab, u32 secid);
-#else
-static inline void	    audit_log_secctx(struct audit_buffer *ab, u32 secid)
-{ }
-#endif
 
 extern int audit_log_task_context(struct audit_buffer *ab);
 extern void audit_log_task_info(struct audit_buffer *ab,
@@ -203,8 +197,6 @@ static inline void audit_log_key(struct audit_buffer *ab, char *key)
 static inline void audit_log_link_denied(const char *string,
 					 const struct path *link)
 { }
-static inline void audit_log_secctx(struct audit_buffer *ab, u32 secid)
-{ }
 static inline int audit_log_task_context(struct audit_buffer *ab)
 {
 	return 0;
@@ -240,7 +232,7 @@ extern void __audit_inode(struct filename *name, const struct dentry *dentry,
 				unsigned int flags);
 extern void __audit_file(const struct file *);
 extern void __audit_inode_child(struct inode *parent,
-				const struct dentry *dentry,
+				struct dentry *dentry,
 				const unsigned char type);
 extern void __audit_seccomp(unsigned long syscall, long signr, int code);
 extern void __audit_ptrace(struct task_struct *t);
@@ -305,7 +297,7 @@ static inline void audit_inode_parent_hidden(struct filename *name,
 				AUDIT_INODE_PARENT | AUDIT_INODE_HIDDEN);
 }
 static inline void audit_inode_child(struct inode *parent,
-				     const struct dentry *dentry,
+				     struct dentry *dentry,
 				     const unsigned char type) {
 	if (unlikely(!audit_dummy_context()))
 		__audit_inode_child(parent, dentry, type);
@@ -314,11 +306,7 @@ void audit_core_dumps(long signr);
 
 static inline void audit_seccomp(unsigned long syscall, long signr, int code)
 {
-	if (!audit_enabled)
-		return;
-
-	/* Force a record to be reported if a signal was delivered. */
-	if (signr || unlikely(!audit_dummy_context()))
+	if (audit_enabled && unlikely(!audit_dummy_context()))
 		__audit_seccomp(syscall, signr, code);
 }
 
@@ -351,7 +339,7 @@ extern int __audit_socketcall(int nargs, unsigned long *args);
 extern int __audit_sockaddr(int len, void *addr);
 extern void __audit_fd_pair(int fd1, int fd2);
 extern void __audit_mq_open(int oflag, umode_t mode, struct mq_attr *attr);
-extern void __audit_mq_sendrecv(mqd_t mqdes, size_t msg_len, unsigned int msg_prio, const struct timespec *abs_timeout);
+extern void __audit_mq_sendrecv(mqd_t mqdes, size_t msg_len, unsigned int msg_prio, const struct timespec64 *abs_timeout);
 extern void __audit_mq_notify(mqd_t mqdes, const struct sigevent *notification);
 extern void __audit_mq_getsetattr(mqd_t mqdes, struct mq_attr *mqstat);
 extern int __audit_log_bprm_fcaps(struct linux_binprm *bprm,
@@ -360,6 +348,7 @@ extern int __audit_log_bprm_fcaps(struct linux_binprm *bprm,
 extern void __audit_log_capset(const struct cred *new, const struct cred *old);
 extern void __audit_mmap_fd(int fd, int flags);
 extern void __audit_log_kern_module(char *name);
+extern void __audit_fanotify(unsigned int response);
 
 static inline void audit_ipc_obj(struct kern_ipc_perm *ipcp)
 {
@@ -412,7 +401,7 @@ static inline void audit_mq_open(int oflag, umode_t mode, struct mq_attr *attr)
 	if (unlikely(!audit_dummy_context()))
 		__audit_mq_open(oflag, mode, attr);
 }
-static inline void audit_mq_sendrecv(mqd_t mqdes, size_t msg_len, unsigned int msg_prio, const struct timespec *abs_timeout)
+static inline void audit_mq_sendrecv(mqd_t mqdes, size_t msg_len, unsigned int msg_prio, const struct timespec64 *abs_timeout)
 {
 	if (unlikely(!audit_dummy_context()))
 		__audit_mq_sendrecv(mqdes, msg_len, msg_prio, abs_timeout);
@@ -456,6 +445,12 @@ static inline void audit_log_kern_module(char *name)
 		__audit_log_kern_module(name);
 }
 
+static inline void audit_fanotify(unsigned int response)
+{
+	if (!audit_dummy_context())
+		__audit_fanotify(response);
+}
+
 extern int audit_n_rules;
 extern int audit_signals;
 #else /* CONFIG_AUDITSYSCALL */
@@ -486,7 +481,7 @@ static inline void __audit_inode(struct filename *name,
 					unsigned int flags)
 { }
 static inline void __audit_inode_child(struct inode *parent,
-					const struct dentry *dentry,
+					struct dentry *dentry,
 					const unsigned char type)
 { }
 static inline void audit_inode(struct filename *name,
@@ -500,7 +495,7 @@ static inline void audit_inode_parent_hidden(struct filename *name,
 				const struct dentry *dentry)
 { }
 static inline void audit_inode_child(struct inode *parent,
-				     const struct dentry *dentry,
+				     struct dentry *dentry,
 				     const unsigned char type)
 { }
 static inline void audit_core_dumps(long signr)
@@ -549,7 +544,7 @@ static inline void audit_mq_open(int oflag, umode_t mode, struct mq_attr *attr)
 { }
 static inline void audit_mq_sendrecv(mqd_t mqdes, size_t msg_len,
 				     unsigned int msg_prio,
-				     const struct timespec *abs_timeout)
+				     const struct timespec64 *abs_timeout)
 { }
 static inline void audit_mq_notify(mqd_t mqdes,
 				   const struct sigevent *notification)
@@ -571,6 +566,9 @@ static inline void audit_mmap_fd(int fd, int flags)
 static inline void audit_log_kern_module(char *name)
 {
 }
+
+static inline void audit_fanotify(unsigned int response)
+{ }
 
 static inline void audit_ptrace(struct task_struct *t)
 { }

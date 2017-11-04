@@ -428,7 +428,7 @@ static void *eeh_add_virt_device(void *data, void *userdata)
 
 	if (!(edev->physfn)) {
 		pr_warn("%s: EEH dev %04x:%02x:%02x.%01x not for VF\n",
-			__func__, edev->phb->global_number, pdn->busno,
+			__func__, pdn->phb->global_number, pdn->busno,
 			PCI_SLOT(pdn->devfn), PCI_FUNC(pdn->devfn));
 		return NULL;
 	}
@@ -441,7 +441,7 @@ static void *eeh_add_virt_device(void *data, void *userdata)
 	}
 
 #ifdef CONFIG_PPC_POWERNV
-	pci_iov_add_virtfn(edev->physfn, pdn->vf_index, 0);
+	pci_iov_add_virtfn(edev->physfn, pdn->vf_index);
 #endif
 	return NULL;
 }
@@ -499,7 +499,7 @@ static void *eeh_rmv_device(void *data, void *userdata)
 #ifdef CONFIG_PPC_POWERNV
 		struct pci_dn *pdn = eeh_dev_to_pdn(edev);
 
-		pci_iov_remove_virtfn(edev->physfn, pdn->vf_index, 0);
+		pci_iov_remove_virtfn(edev->physfn, pdn->vf_index);
 		edev->pdev = NULL;
 
 		/*

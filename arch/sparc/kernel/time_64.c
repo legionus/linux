@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* time.c: UltraSparc timer and TOD clock support.
  *
  * Copyright (C) 1997, 2008 David S. Miller (davem@davemloft.net)
@@ -27,7 +28,6 @@
 #include <linux/jiffies.h>
 #include <linux/cpufreq.h>
 #include <linux/percpu.h>
-#include <linux/miscdevice.h>
 #include <linux/rtc/m48t59.h>
 #include <linux/kernel_stat.h>
 #include <linux/clockchips.h>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/kernel/sys.c
  *
@@ -1896,15 +1897,11 @@ static int validate_prctl_map(struct prctl_mm_map *prctl_map)
 
 	/*
 	 * Finally, make sure the caller has the rights to
-	 * change /proc/pid/exe link: only local root should
+	 * change /proc/pid/exe link: only local sys admin should
 	 * be allowed to.
 	 */
 	if (prctl_map->exe_fd != (u32)-1) {
-		struct user_namespace *ns = current_user_ns();
-		const struct cred *cred = current_cred();
-
-		if (!uid_eq(cred->uid, make_kuid(ns, 0)) ||
-		    !gid_eq(cred->gid, make_kgid(ns, 0)))
+		if (!ns_capable(current_user_ns(), CAP_SYS_ADMIN))
 			goto out;
 	}
 
@@ -2209,6 +2206,17 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		break;
 	case PR_GET_PDEATHSIG:
 		error = put_user(me->pdeath_signal, (int __user *)arg2);
+		break;
+	case PR_SET_PDEATHSIG_PROC:
+		if (!valid_signal(arg2)) {
+			error = -EINVAL;
+			break;
+		}
+		me->signal->pdeath_signal_proc = arg2;
+		break;
+	case PR_GET_PDEATHSIG_PROC:
+		error = put_user(me->signal->pdeath_signal_proc,
+				 (int __user *)arg2);
 		break;
 	case PR_GET_DUMPABLE:
 		error = get_dumpable(me->mm);

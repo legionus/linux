@@ -89,6 +89,7 @@ static int mtu3_ep_enable(struct mtu3_ep *mep)
 
 	switch (mtu->g.speed) {
 	case USB_SPEED_SUPER:
+	case USB_SPEED_SUPER_PLUS:
 		if (usb_endpoint_xfer_int(desc) ||
 				usb_endpoint_xfer_isoc(desc)) {
 			interval = desc->bInterval;
@@ -456,7 +457,7 @@ static int mtu3_gadget_wakeup(struct usb_gadget *gadget)
 		return  -EOPNOTSUPP;
 
 	spin_lock_irqsave(&mtu->lock, flags);
-	if (mtu->g.speed == USB_SPEED_SUPER) {
+	if (mtu->g.speed >= USB_SPEED_SUPER) {
 		mtu3_setbits(mtu->mac_base, U3D_LINK_POWER_CONTROL, UX_EXIT);
 	} else {
 		mtu3_setbits(mtu->mac_base, U3D_POWER_MANAGEMENT, RESUME);
@@ -663,6 +664,7 @@ int mtu3_gadget_setup(struct mtu3 *mtu)
 	mtu->g.sg_supported = 0;
 	mtu->g.name = MTU3_DRIVER_NAME;
 	mtu->is_active = 0;
+	mtu->delayed_status = false;
 
 	mtu3_gadget_init_eps(mtu);
 
@@ -727,4 +729,7 @@ void mtu3_gadget_reset(struct mtu3 *mtu)
 	mtu->address = 0;
 	mtu->ep0_state = MU3D_EP0_STATE_SETUP;
 	mtu->may_wakeup = 0;
+	mtu->u1_enable = 0;
+	mtu->u2_enable = 0;
+	mtu->delayed_status = false;
 }

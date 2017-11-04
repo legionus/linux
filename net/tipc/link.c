@@ -978,15 +978,15 @@ static void link_retransmit_failure(struct tipc_link *l, struct sk_buff *skb)
 	struct tipc_msg *hdr = buf_msg(skb);
 
 	pr_warn("Retransmission failure on link <%s>\n", l->name);
-	link_print(l, "Resetting link ");
+	link_print(l, "State of link ");
 	pr_info("Failed msg: usr %u, typ %u, len %u, err %u\n",
 		msg_user(hdr), msg_type(hdr), msg_size(hdr), msg_errcode(hdr));
 	pr_info("sqno %u, prev: %x, src: %x\n",
 		msg_seqno(hdr), msg_prevnode(hdr), msg_orignode(hdr));
 }
 
-int tipc_link_retrans(struct tipc_link *l, u16 from, u16 to,
-		      struct sk_buff_head *xmitq)
+int tipc_link_retrans(struct tipc_link *l, struct tipc_link *nacker,
+		      u16 from, u16 to, struct sk_buff_head *xmitq)
 {
 	struct sk_buff *_skb, *skb = skb_peek(&l->transmq);
 	struct tipc_msg *hdr;
@@ -997,11 +997,14 @@ int tipc_link_retrans(struct tipc_link *l, u16 from, u16 to,
 		return 0;
 
 	/* Detect repeated retransmit failures on same packet */
-	if (likely(l->last_retransm != buf_seqno(skb))) {
-		l->last_retransm = buf_seqno(skb);
-		l->stale_count = 1;
-	} else if (++l->stale_count > 100) {
+	if (nacker->last_retransm != buf_seqno(skb)) {
+		nacker->last_retransm = buf_seqno(skb);
+		nacker->stale_count = 1;
+	} else if (++nacker->stale_count > 100) {
 		link_retransmit_failure(l, skb);
+		nacker->stale_count = 0;
+		if (link_is_bc_sndlink(l))
+			return TIPC_LINK_DOWN_EVT;
 		return tipc_link_fsm_evt(l, LINK_FAILURE_EVT);
 	}
 
@@ -1036,6 +1039,7 @@ int tipc_link_retrans(struct tipc_link *l, u16 from, u16 to,
 static bool tipc_data_input(struct tipc_link *l, struct sk_buff *skb,
 			    struct sk_buff_head *inputq)
 {
+	struct sk_buff_head *mc_inputq = l->bc_rcvlink->inputq;
 	struct tipc_msg *hdr = buf_msg(skb);
 
 	switch (msg_user(hdr)) {
@@ -1043,12 +1047,15 @@ static bool tipc_data_input(struct tipc_link *l, struct sk_buff *skb,
 	case TIPC_MEDIUM_IMPORTANCE:
 	case TIPC_HIGH_IMPORTANCE:
 	case TIPC_CRITICAL_IMPORTANCE:
-		if (unlikely(msg_type(hdr) == TIPC_MCAST_MSG)) {
-			skb_queue_tail(l->bc_rcvlink->inputq, skb);
+		if (unlikely(msg_in_group(hdr) || msg_mcast(hdr))) {
+			skb_queue_tail(mc_inputq, skb);
 			return true;
 		}
 	case CONN_MANAGER:
 		skb_queue_tail(inputq, skb);
+		return true;
+	case GROUP_PROTOCOL:
+		skb_queue_tail(mc_inputq, skb);
 		return true;
 	case NAME_DISTRIBUTOR:
 		l->bc_rcvlink->state = LINK_ESTABLISHED;
@@ -1528,7 +1535,7 @@ static int tipc_link_proto_rcv(struct tipc_link *l, struct sk_buff *skb,
 
 		/* If NACK, retransmit will now start at right position */
 		if (gap) {
-			rc = tipc_link_retrans(l, ack + 1, ack + gap, xmitq);
+			rc = tipc_link_retrans(l, l, ack + 1, ack + gap, xmitq);
 			l->stats.recv_nacks++;
 		}
 
@@ -1680,7 +1687,7 @@ int tipc_link_bc_sync_rcv(struct tipc_link *l, struct tipc_msg *hdr,
 		return rc;
 
 	if (link_bc_retr_eval(snd_l, &from, &to))
-		rc = tipc_link_retrans(snd_l, from, to, xmitq);
+		rc = tipc_link_retrans(snd_l, l, from, to, xmitq);
 
 	l->snd_nxt = peers_snd_nxt;
 	if (link_bc_rcv_gap(l))
@@ -1775,7 +1782,7 @@ int tipc_link_bc_nack_rcv(struct tipc_link *l, struct sk_buff *skb,
 
 	if (dnode == tipc_own_addr(l->net)) {
 		tipc_link_bc_ack_rcv(l, acked, xmitq);
-		rc = tipc_link_retrans(l->bc_sndlink, from, to, xmitq);
+		rc = tipc_link_retrans(l->bc_sndlink, l, from, to, xmitq);
 		l->stats.recv_nacks++;
 		return rc;
 	}

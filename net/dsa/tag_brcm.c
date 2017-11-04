@@ -61,7 +61,8 @@
 
 static struct sk_buff *brcm_tag_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	struct dsa_slave_priv *p = netdev_priv(dev);
+	struct dsa_port *dp = dsa_slave_to_port(dev);
+	u16 queue = skb_get_queue_mapping(skb);
 	u8 *brcm_tag;
 
 	if (skb_cow_head(skb, BRCM_TAG_LEN) < 0)
@@ -78,23 +79,24 @@ static struct sk_buff *brcm_tag_xmit(struct sk_buff *skb, struct net_device *dev
 	 * deprecated
 	 */
 	brcm_tag[0] = (1 << BRCM_OPCODE_SHIFT) |
-			((skb->priority << BRCM_IG_TC_SHIFT) & BRCM_IG_TC_MASK);
+		       ((queue & BRCM_IG_TC_MASK) << BRCM_IG_TC_SHIFT);
 	brcm_tag[1] = 0;
 	brcm_tag[2] = 0;
-	if (p->dp->index == 8)
+	if (dp->index == 8)
 		brcm_tag[2] = BRCM_IG_DSTMAP2_MASK;
-	brcm_tag[3] = (1 << p->dp->index) & BRCM_IG_DSTMAP1_MASK;
+	brcm_tag[3] = (1 << dp->index) & BRCM_IG_DSTMAP1_MASK;
+
+	/* Now tell the master network device about the desired output queue
+	 * as well
+	 */
+	skb_set_queue_mapping(skb, BRCM_TAG_SET_PORT_QUEUE(dp->index, queue));
 
 	return skb;
 }
 
 static struct sk_buff *brcm_tag_rcv(struct sk_buff *skb, struct net_device *dev,
-				    struct packet_type *pt,
-				    struct net_device *orig_dev)
+				    struct packet_type *pt)
 {
-	struct dsa_switch_tree *dst = dev->dsa_ptr;
-	struct dsa_port *cpu_dp = dsa_get_cpu_port(dst);
-	struct dsa_switch *ds = cpu_dp->ds;
 	int source_port;
 	u8 *brcm_tag;
 
@@ -117,8 +119,8 @@ static struct sk_buff *brcm_tag_rcv(struct sk_buff *skb, struct net_device *dev,
 	/* Locate which port this is coming from */
 	source_port = brcm_tag[3] & BRCM_EG_PID_MASK;
 
-	/* Validate port against switch setup, either the port is totally */
-	if (source_port >= ds->num_ports || !ds->ports[source_port].netdev)
+	skb->dev = dsa_master_find_slave(dev, 0, source_port);
+	if (!skb->dev)
 		return NULL;
 
 	/* Remove Broadcom tag and update checksum */
@@ -128,8 +130,6 @@ static struct sk_buff *brcm_tag_rcv(struct sk_buff *skb, struct net_device *dev,
 	memmove(skb->data - ETH_HLEN,
 		skb->data - ETH_HLEN - BRCM_TAG_LEN,
 		2 * ETH_ALEN);
-
-	skb->dev = ds->ports[source_port].netdev;
 
 	return skb;
 }

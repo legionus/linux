@@ -42,9 +42,11 @@
 
 static bool nfp_net_ebpf_capable(struct nfp_net *nn)
 {
+#ifdef __LITTLE_ENDIAN
 	if (nn->cap & NFP_NET_CFG_CTRL_BPF &&
 	    nn_readb(nn, NFP_NET_CFG_BPF_ABI) == NFP_NET_BPF_ABI)
 		return true;
+#endif
 	return false;
 }
 
@@ -84,18 +86,10 @@ static const char *nfp_bpf_extra_cap(struct nfp_app *app, struct nfp_net *nn)
 }
 
 static int
-nfp_bpf_vnic_init(struct nfp_app *app, struct nfp_net *nn, unsigned int id)
+nfp_bpf_vnic_alloc(struct nfp_app *app, struct nfp_net *nn, unsigned int id)
 {
 	struct nfp_net_bpf_priv *priv;
 	int ret;
-
-	/* Limit to single port, otherwise it's just a NIC */
-	if (id > 0) {
-		nfp_warn(app->cpp,
-			 "BPF NIC doesn't support more than one port right now\n");
-		nn->port = nfp_port_alloc(app, NFP_PORT_INVALID, nn->dp.netdev);
-		return PTR_ERR_OR_ZERO(nn->port);
-	}
 
 	priv = kmalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -103,41 +97,80 @@ nfp_bpf_vnic_init(struct nfp_app *app, struct nfp_net *nn, unsigned int id)
 
 	nn->app_priv = priv;
 	spin_lock_init(&priv->rx_filter_lock);
-	setup_timer(&priv->rx_filter_stats_timer,
-		    nfp_net_filter_stats_timer, (unsigned long)nn);
+	priv->nn = nn;
+	timer_setup(&priv->rx_filter_stats_timer,
+		    nfp_net_filter_stats_timer, 0);
 
-	ret = nfp_app_nic_vnic_init(app, nn, id);
+	ret = nfp_app_nic_vnic_alloc(app, nn, id);
 	if (ret)
 		kfree(priv);
 
 	return ret;
 }
 
-static void nfp_bpf_vnic_clean(struct nfp_app *app, struct nfp_net *nn)
+static void nfp_bpf_vnic_free(struct nfp_app *app, struct nfp_net *nn)
 {
 	if (nn->dp.bpf_offload_xdp)
 		nfp_bpf_xdp_offload(app, nn, NULL);
 	kfree(nn->app_priv);
 }
 
-static int nfp_bpf_setup_tc(struct nfp_app *app, struct net_device *netdev,
-			    u32 handle, __be16 proto, struct tc_to_netdev *tc)
+static int nfp_bpf_setup_tc_block_cb(enum tc_setup_type type,
+				     void *type_data, void *cb_priv)
+{
+	struct tc_cls_bpf_offload *cls_bpf = type_data;
+	struct nfp_net *nn = cb_priv;
+
+	if (!tc_can_offload(nn->dp.netdev))
+		return -EOPNOTSUPP;
+
+	switch (type) {
+	case TC_SETUP_CLSBPF:
+		if (!nfp_net_ebpf_capable(nn) ||
+		    cls_bpf->common.protocol != htons(ETH_P_ALL) ||
+		    cls_bpf->common.chain_index)
+			return -EOPNOTSUPP;
+		if (nn->dp.bpf_offload_xdp)
+			return -EBUSY;
+
+		return nfp_net_bpf_offload(nn, cls_bpf);
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static int nfp_bpf_setup_tc_block(struct net_device *netdev,
+				  struct tc_block_offload *f)
 {
 	struct nfp_net *nn = netdev_priv(netdev);
 
-	if (TC_H_MAJ(handle) != TC_H_MAJ(TC_H_INGRESS))
-		return -EOPNOTSUPP;
-	if (proto != htons(ETH_P_ALL))
+	if (f->binder_type != TCF_BLOCK_BINDER_TYPE_CLSACT_INGRESS)
 		return -EOPNOTSUPP;
 
-	if (tc->type == TC_SETUP_CLSBPF && nfp_net_ebpf_capable(nn)) {
-		if (!nn->dp.bpf_offload_xdp)
-			return nfp_net_bpf_offload(nn, tc->cls_bpf);
-		else
-			return -EBUSY;
+	switch (f->command) {
+	case TC_BLOCK_BIND:
+		return tcf_block_cb_register(f->block,
+					     nfp_bpf_setup_tc_block_cb,
+					     nn, nn);
+	case TC_BLOCK_UNBIND:
+		tcf_block_cb_unregister(f->block,
+					nfp_bpf_setup_tc_block_cb,
+					nn);
+		return 0;
+	default:
+		return -EOPNOTSUPP;
 	}
+}
 
-	return -EINVAL;
+static int nfp_bpf_setup_tc(struct nfp_app *app, struct net_device *netdev,
+			    enum tc_setup_type type, void *type_data)
+{
+	switch (type) {
+	case TC_SETUP_BLOCK:
+		return nfp_bpf_setup_tc_block(netdev, type_data);
+	default:
+		return -EOPNOTSUPP;
+	}
 }
 
 static bool nfp_bpf_tc_busy(struct nfp_app *app, struct nfp_net *nn)
@@ -151,8 +184,8 @@ const struct nfp_app_type app_bpf = {
 
 	.extra_cap	= nfp_bpf_extra_cap,
 
-	.vnic_init	= nfp_bpf_vnic_init,
-	.vnic_clean	= nfp_bpf_vnic_clean,
+	.vnic_alloc	= nfp_bpf_vnic_alloc,
+	.vnic_free	= nfp_bpf_vnic_free,
 
 	.setup_tc	= nfp_bpf_setup_tc,
 	.tc_busy	= nfp_bpf_tc_busy,

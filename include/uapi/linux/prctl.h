@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _LINUX_PRCTL_H
 #define _LINUX_PRCTL_H
 
@@ -196,5 +197,9 @@ struct prctl_mm_map {
 # define PR_CAP_AMBIENT_RAISE		2
 # define PR_CAP_AMBIENT_LOWER		3
 # define PR_CAP_AMBIENT_CLEAR_ALL	4
+
+/* Process-based variant of PDEATHSIG */
+#define PR_SET_PDEATHSIG_PROC		48
+#define PR_GET_PDEATHSIG_PROC		49
 
 #endif /* _LINUX_PRCTL_H */

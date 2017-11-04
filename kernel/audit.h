@@ -85,6 +85,7 @@ struct audit_names {
 
 	unsigned long		ino;
 	dev_t			dev;
+	struct dentry		*dentry;
 	umode_t			mode;
 	kuid_t			uid;
 	kgid_t			gid;
@@ -182,7 +183,7 @@ struct audit_context {
 			mqd_t			mqdes;
 			size_t			msg_len;
 			unsigned int		msg_prio;
-			struct timespec		abs_timeout;
+			struct timespec64	abs_timeout;
 		} mq_sendrecv;
 		struct {
 			int			oflag;
@@ -208,7 +209,7 @@ struct audit_context {
 	struct audit_proctitle proctitle;
 };
 
-extern u32 audit_ever_enabled;
+extern bool audit_ever_enabled;
 
 extern void audit_copy_inode(struct audit_names *name,
 			     const struct dentry *dentry,

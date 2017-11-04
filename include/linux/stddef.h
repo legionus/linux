@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_STDDEF_H
 #define _LINUX_STDDEF_H
 
@@ -17,6 +18,8 @@ enum {
 #else
 #define offsetof(TYPE, MEMBER)	((size_t)&((TYPE *)0)->MEMBER)
 #endif
+
+#define sizeof_field(structure, field) sizeof((((structure *)0)->field))
 
 /**
  * offsetofend(TYPE, MEMBER)

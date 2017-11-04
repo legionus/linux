@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/proc/root.c
  *
@@ -15,6 +16,7 @@
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/sched/stat.h>
+#include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/user_namespace.h>
@@ -26,20 +28,65 @@
 #include "internal.h"
 
 enum {
-	Opt_gid, Opt_hidepid, Opt_err,
+	Opt_gid, Opt_hidepid, Opt_newinstance, Opt_pids, Opt_err,
 };
 
 static const match_table_t tokens = {
 	{Opt_hidepid, "hidepid=%u"},
 	{Opt_gid, "gid=%u"},
+	{Opt_newinstance, "newinstance"},
+	{Opt_pids, "pids=%s"},
 	{Opt_err, NULL},
 };
 
-int proc_parse_options(char *options, struct pid_namespace *pid)
+/* We only parse 'newinstance' option here */
+int proc_parse_early_options(char *options, struct proc_fs_info *fs_info)
+{
+	char *p, *opts, *orig;
+	substring_t args[MAX_OPT_ARGS];
+
+	if (!options)
+		return 0;
+
+	opts = kstrdup(options, GFP_KERNEL);
+	if (!opts)
+		return -ENOMEM;
+
+	orig = opts;
+
+	while ((p = strsep(&opts, ",")) != NULL) {
+		int token;
+
+		if (!*p)
+			continue;
+
+		token = match_token(p, tokens, args);
+		switch (token) {
+		case Opt_newinstance:
+			proc_fs_set_newinstance(fs_info, true);
+			pr_info("proc: mounting a new procfs instance ");
+			break;
+		case Opt_gid:
+		case Opt_hidepid:
+		case Opt_pids:
+			break;
+		default:
+			pr_err("proc: unrecognized mount option \"%s\" "
+			       "or missing value\n", p);
+			return -EINVAL;
+		}
+	}
+
+	kfree(orig);
+	return 0;
+}
+
+int proc_parse_options(char *options, struct proc_fs_info *fs_info)
 {
 	char *p;
 	substring_t args[MAX_OPT_ARGS];
-	int option;
+	int option, ret = 0;
+	kgid_t gid;
 
 	if (!options)
 		return 1;
@@ -55,7 +102,12 @@ int proc_parse_options(char *options, struct pid_namespace *pid)
 		case Opt_gid:
 			if (match_int(&args[0], &option))
 				return 0;
-			pid->pid_gid = make_kgid(current_user_ns(), option);
+			gid = make_kgid(current_user_ns(), option);
+			if (!gid_valid(gid)) {
+				pr_err("proc: invalid gid mount option.\n");
+				return 0;
+			}
+			proc_fs_set_pid_gid(fs_info, gid);
 			break;
 		case Opt_hidepid:
 			if (match_int(&args[0], &option))
@@ -65,7 +117,22 @@ int proc_parse_options(char *options, struct pid_namespace *pid)
 				pr_err("proc: hidepid value must be between 0 and 2.\n");
 				return 0;
 			}
-			pid->hide_pid = option;
+			proc_fs_set_hide_pid(fs_info, option);
+			break;
+		case Opt_newinstance:
+			break;
+		case Opt_pids:
+			if (strcmp(args[0].from, "all") == 0)
+				ret = proc_fs_set_pids(fs_info, HIDEPID_OFF);
+			else if (strcmp(args[0].from, "ptraceable") == 0)
+				ret = proc_fs_set_pids(fs_info, HIDEPID_INVISIBLE);
+			else
+				ret = -EINVAL;
+
+			if (ret < 0) {
+				pr_err("proc: invalid 'pids' mount option.\n");
+				return 0;
+			}
 			break;
 		default:
 			pr_err("proc: unrecognized mount option \"%s\" "
@@ -79,38 +146,125 @@ int proc_parse_options(char *options, struct pid_namespace *pid)
 
 int proc_remount(struct super_block *sb, int *flags, char *data)
 {
-	struct pid_namespace *pid = sb->s_fs_info;
+	int error;
+	struct proc_fs_info *fs_info = proc_sb(sb);
 
 	sync_filesystem(sb);
-	return !proc_parse_options(data, pid);
+
+	/*
+	 * If this is a new instance, then parse again the proc mount
+	 * options.
+	 */
+	if (proc_fs_newinstance(fs_info)) {
+		error = proc_parse_early_options(data, fs_info);
+		if (error < 0)
+			return error;
+	}
+
+	return !proc_parse_options(data, fs_info);
+}
+
+static int proc_test_super(struct super_block *sb, void *data)
+{
+	struct proc_fs_info *p = data;
+	struct proc_fs_info *fs_info = proc_sb(sb);
+
+	if (!proc_fs_newinstance(p) && !proc_fs_newinstance(fs_info) &&
+	    p->pid_ns == fs_info->pid_ns)
+		return 1;
+
+	return 0;
+}
+
+static int proc_set_super(struct super_block *sb, void *data)
+{
+	sb->s_fs_info = data;
+	return set_anon_super(sb, NULL);
 }
 
 static struct dentry *proc_mount(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data)
 {
+	int error = 0;
+	struct super_block *sb;
 	struct pid_namespace *ns;
+	struct proc_fs_info *fs_info;
 
-	if (flags & MS_KERNMOUNT) {
+	/*
+	 * Don't allow mounting unless the caller has CAP_SYS_ADMIN over
+	 * the namespace.
+	 */
+	if (!(flags & SB_KERNMOUNT) && !ns_capable(current_user_ns(), CAP_SYS_ADMIN))
+		return ERR_PTR(-EPERM);
+
+	fs_info = kzalloc(sizeof(*fs_info), GFP_NOFS);
+	if (!fs_info)
+		return ERR_PTR(-ENOMEM);
+
+	/* Set it as early as possible */
+	proc_fs_set_newinstance(fs_info, false);
+	proc_fs_set_pids(fs_info, HIDEPID_OFF);
+
+	if (flags & SB_KERNMOUNT) {
 		ns = data;
 		data = NULL;
 	} else {
+		/* Parse early mount options if not a kernel mount */
+		error = proc_parse_early_options(data, fs_info);
+		if (error < 0)
+			goto error_fs_info;
+
 		ns = task_active_pid_ns(current);
 	}
 
-	return mount_ns(fs_type, flags, data, ns, ns->user_ns, proc_fill_super);
+	fs_info->pid_ns = ns;
+
+	sb = sget_userns(fs_type, proc_test_super, proc_set_super, flags,
+			 ns->user_ns, fs_info);
+	if (IS_ERR(sb)) {
+		error = PTR_ERR(sb);
+		goto error_fs_info;
+	}
+
+	if (sb->s_root) {
+		kfree(fs_info);
+	} else {
+		error = proc_fill_super(sb, data, flags & SB_SILENT ? 1 : 0);
+		if (error) {
+			deactivate_locked_super(sb);
+			goto error;
+		}
+
+		sb->s_flags |= SB_ACTIVE;
+	}
+
+	return dget(sb->s_root);
+
+error_fs_info:
+	kfree(fs_info);
+error:
+	return ERR_PTR(error);
 }
 
 static void proc_kill_sb(struct super_block *sb)
 {
-	struct pid_namespace *ns;
+	struct proc_fs_info *fs_info = proc_sb(sb);
+	struct pid_namespace *ns = (struct pid_namespace *)fs_info->pid_ns;
 
-	ns = (struct pid_namespace *)sb->s_fs_info;
-	if (ns->proc_self)
-		dput(ns->proc_self);
-	if (ns->proc_thread_self)
-		dput(ns->proc_thread_self);
+	if (fs_info->proc_self)
+		dput(fs_info->proc_self);
+	if (fs_info->proc_thread_self)
+		dput(fs_info->proc_thread_self);
+
+	if (proc_fs_newinstance(fs_info)) {
+		pidns_proc_lock(ns);
+		list_del(&fs_info->pidns_entry);
+		pidns_proc_unlock(ns);
+	}
+
 	kill_anon_super(sb);
 	put_pid_ns(ns);
+	kfree(fs_info);
 }
 
 static struct file_system_type proc_fs_type = {
@@ -210,7 +364,7 @@ struct proc_dir_entry proc_root = {
 	.proc_iops	= &proc_root_inode_operations, 
 	.proc_fops	= &proc_root_operations,
 	.parent		= &proc_root,
-	.subdir		= RB_ROOT,
+	.subdir		= RB_ROOT_CACHED,
 	.name		= "/proc",
 };
 
@@ -223,6 +377,9 @@ int pid_ns_prepare_proc(struct pid_namespace *ns)
 		return PTR_ERR(mnt);
 
 	ns->proc_mnt = mnt;
+	init_rwsem(&ns->rw_procfs_mnts);
+	INIT_LIST_HEAD(&ns->procfs_mounts);
+
 	return 0;
 }
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_SCHED_SIGNAL_H
 #define _LINUX_SCHED_SIGNAL_H
 
@@ -102,6 +103,9 @@ struct signal_struct {
 	/* thread group stop support, overloads group_exit_code too */
 	int			group_stop_count;
 	unsigned int		flags; /* see SIGNAL_* flags below */
+
+	/* The signal sent when the parent dies: */
+	int			pdeath_signal_proc;
 
 	/*
 	 * PR_SET_CHILD_SUBREAPER marks a process, like a service

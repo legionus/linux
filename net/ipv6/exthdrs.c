@@ -89,6 +89,7 @@ static bool ip6_tlvopt_unknown(struct sk_buff *skb, int optoff)
 		 */
 		if (ipv6_addr_is_multicast(&ipv6_hdr(skb)->daddr))
 			break;
+		/* fall through */
 	case 2: /* send ICMP PARM PROB regardless and drop packet */
 		icmpv6_param_prob(skb, ICMPV6_UNK_OPTION, optoff);
 		return false;
@@ -186,7 +187,6 @@ static bool ipv6_dest_hao(struct sk_buff *skb, int optoff)
 	struct ipv6_destopt_hao *hao;
 	struct inet6_skb_parm *opt = IP6CB(skb);
 	struct ipv6hdr *ipv6h = ipv6_hdr(skb);
-	struct in6_addr tmp_addr;
 	int ret;
 
 	if (opt->dsthao) {
@@ -228,9 +228,7 @@ static bool ipv6_dest_hao(struct sk_buff *skb, int optoff)
 	if (skb->ip_summed == CHECKSUM_COMPLETE)
 		skb->ip_summed = CHECKSUM_NONE;
 
-	tmp_addr = ipv6h->saddr;
-	ipv6h->saddr = hao->addr;
-	hao->addr = tmp_addr;
+	swap(ipv6h->saddr, hao->addr);
 
 	if (skb->tstamp == 0)
 		__net_timestamp(skb);
@@ -882,7 +880,7 @@ static void ipv6_push_rthdr4(struct sk_buff *skb, u8 *proto,
 	       (hops - 1) * sizeof(struct in6_addr));
 
 	sr_phdr->segments[0] = **addr_p;
-	*addr_p = &sr_ihdr->segments[hops - 1];
+	*addr_p = &sr_ihdr->segments[sr_ihdr->segments_left];
 
 #ifdef CONFIG_IPV6_SEG6_HMAC
 	if (sr_has_hmac(sr_phdr)) {
@@ -1174,7 +1172,7 @@ struct in6_addr *fl6_update_dst(struct flowi6 *fl6,
 	{
 		struct ipv6_sr_hdr *srh = (struct ipv6_sr_hdr *)opt->srcrt;
 
-		fl6->daddr = srh->segments[srh->first_segment];
+		fl6->daddr = srh->segments[srh->segments_left];
 		break;
 	}
 	default:

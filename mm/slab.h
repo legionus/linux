@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef MM_SLAB_H
 #define MM_SLAB_H
 /*
@@ -21,6 +22,8 @@ struct kmem_cache {
 	unsigned int size;	/* The aligned/padded/added on size  */
 	unsigned int align;	/* Alignment as calculated */
 	unsigned long flags;	/* Active flags on the slab */
+	size_t useroffset;	/* Usercopy region offset */
+	size_t usersize;	/* Usercopy region size */
 	const char *name;	/* Slab name for sysfs */
 	int refcount;		/* Use counter */
 	void (*ctor)(void *);	/* Called on object slot creation */
@@ -39,10 +42,10 @@ struct kmem_cache {
 
 #include <linux/memcontrol.h>
 #include <linux/fault-inject.h>
-#include <linux/kmemcheck.h>
 #include <linux/kasan.h>
 #include <linux/kmemleak.h>
 #include <linux/random.h>
+#include <linux/sched/mm.h>
 
 /*
  * State of the slab allocator.
@@ -94,9 +97,11 @@ struct kmem_cache *kmalloc_slab(size_t, gfp_t);
 extern int __kmem_cache_create(struct kmem_cache *, unsigned long flags);
 
 extern struct kmem_cache *create_kmalloc_cache(const char *name, size_t size,
-			unsigned long flags);
+			unsigned long flags, size_t useroffset,
+			size_t usersize);
 extern void create_boot_cache(struct kmem_cache *, const char *name,
-			size_t size, unsigned long flags);
+			size_t size, unsigned long flags, size_t useroffset,
+			size_t usersize);
 
 int slab_unmergeable(struct kmem_cache *s);
 struct kmem_cache *find_mergeable(size_t size, size_t align,
@@ -140,10 +145,10 @@ static inline unsigned long kmem_cache_flags(unsigned long object_size,
 #if defined(CONFIG_SLAB)
 #define SLAB_CACHE_FLAGS (SLAB_MEM_SPREAD | SLAB_NOLEAKTRACE | \
 			  SLAB_RECLAIM_ACCOUNT | SLAB_TEMPORARY | \
-			  SLAB_NOTRACK | SLAB_ACCOUNT)
+			  SLAB_ACCOUNT)
 #elif defined(CONFIG_SLUB)
 #define SLAB_CACHE_FLAGS (SLAB_NOLEAKTRACE | SLAB_RECLAIM_ACCOUNT | \
-			  SLAB_TEMPORARY | SLAB_NOTRACK | SLAB_ACCOUNT)
+			  SLAB_TEMPORARY | SLAB_ACCOUNT)
 #else
 #define SLAB_CACHE_FLAGS (0)
 #endif
@@ -162,7 +167,6 @@ static inline unsigned long kmem_cache_flags(unsigned long object_size,
 			      SLAB_NOLEAKTRACE | \
 			      SLAB_RECLAIM_ACCOUNT | \
 			      SLAB_TEMPORARY | \
-			      SLAB_NOTRACK | \
 			      SLAB_ACCOUNT)
 
 int __kmem_cache_shutdown(struct kmem_cache *);
@@ -257,7 +261,7 @@ cache_from_memcg_idx(struct kmem_cache *s, int idx)
 	 * memcg_caches issues a write barrier to match this (see
 	 * memcg_create_kmem_cache()).
 	 */
-	cachep = lockless_dereference(arr->entries[idx]);
+	cachep = READ_ONCE(arr->entries[idx]);
 	rcu_read_unlock();
 
 	return cachep;
@@ -412,7 +416,10 @@ static inline struct kmem_cache *slab_pre_alloc_hook(struct kmem_cache *s,
 						     gfp_t flags)
 {
 	flags &= gfp_allowed_mask;
-	lockdep_trace_alloc(flags);
+
+	fs_reclaim_acquire(flags);
+	fs_reclaim_release(flags);
+
 	might_sleep_if(gfpflags_allow_blocking(flags));
 
 	if (should_failslab(s, flags))
@@ -434,7 +441,6 @@ static inline void slab_post_alloc_hook(struct kmem_cache *s, gfp_t flags,
 	for (i = 0; i < size; i++) {
 		void *object = p[i];
 
-		kmemcheck_slab_alloc(s, flags, object, slab_ksize(s));
 		kmemleak_alloc_recursive(object, s->object_size, 1,
 					 s->flags, flags);
 		kasan_slab_alloc(s, object, flags);
@@ -500,6 +506,14 @@ void *memcg_slab_start(struct seq_file *m, loff_t *pos);
 void *memcg_slab_next(struct seq_file *m, void *p, loff_t *pos);
 void memcg_slab_stop(struct seq_file *m, void *p);
 int memcg_slab_show(struct seq_file *m, void *p);
+
+#if defined(CONFIG_SLAB) || defined(CONFIG_SLUB_DEBUG)
+void dump_unreclaimable_slab(void);
+#else
+static inline void dump_unreclaimable_slab(void)
+{
+}
+#endif
 
 void ___cache_free(struct kmem_cache *cache, void *x, unsigned long addr);
 

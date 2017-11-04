@@ -104,6 +104,8 @@ unsigned long __vmalloc_start;
 EXPORT_SYMBOL(__vmalloc_start);
 unsigned long __vmalloc_end;
 EXPORT_SYMBOL(__vmalloc_end);
+unsigned long __kernel_io_start;
+EXPORT_SYMBOL(__kernel_io_start);
 struct page *vmemmap;
 EXPORT_SYMBOL(vmemmap);
 unsigned long __pte_frag_nr;
@@ -402,7 +404,7 @@ void pte_fragment_free(unsigned long *table, int kernel)
 	if (put_page_testzero(page)) {
 		if (!kernel)
 			pgtable_page_dtor(page);
-		free_hot_cold_page(page, 0);
+		free_unref_page(page);
 	}
 }
 

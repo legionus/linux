@@ -29,10 +29,8 @@
 #include "phy-mv-usb.h"
 
 #define	DRIVER_DESC	"Marvell USB OTG transceiver driver"
-#define	DRIVER_VERSION	"Jan 20, 2010"
 
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_VERSION(DRIVER_VERSION);
 MODULE_LICENSE("GPL");
 
 static const char driver_name[] = "mv-otg";
@@ -89,9 +87,10 @@ static void mv_otg_run_state_machine(struct mv_otg *mvotg,
 	queue_delayed_work(mvotg->qwork, &mvotg->work, delay);
 }
 
-static void mv_otg_timer_await_bcon(unsigned long data)
+static void mv_otg_timer_await_bcon(struct timer_list *t)
 {
-	struct mv_otg *mvotg = (struct mv_otg *) data;
+	struct mv_otg *mvotg = from_timer(mvotg, t,
+					  otg_ctrl.timer[A_WAIT_BCON_TIMER]);
 
 	mvotg->otg_ctrl.a_wait_bcon_timeout = 1;
 
@@ -119,8 +118,7 @@ static int mv_otg_cancel_timer(struct mv_otg *mvotg, unsigned int id)
 }
 
 static int mv_otg_set_timer(struct mv_otg *mvotg, unsigned int id,
-			    unsigned long interval,
-			    void (*callback) (unsigned long))
+			    unsigned long interval)
 {
 	struct timer_list *timer;
 
@@ -133,9 +131,6 @@ static int mv_otg_set_timer(struct mv_otg *mvotg, unsigned int id,
 		return -EBUSY;
 	}
 
-	init_timer(timer);
-	timer->data = (unsigned long) mvotg;
-	timer->function = callback;
 	timer->expires = jiffies + interval;
 	add_timer(timer);
 
@@ -461,8 +456,7 @@ run:
 			if (old_state != OTG_STATE_A_HOST)
 				mv_otg_start_host(mvotg, 1);
 			mv_otg_set_timer(mvotg, A_WAIT_BCON_TIMER,
-					 T_A_WAIT_BCON,
-					 mv_otg_timer_await_bcon);
+					 T_A_WAIT_BCON);
 			/*
 			 * Now, we directly enter A_HOST. So set b_conn = 1
 			 * here. In fact, it need host driver to notify us.
@@ -650,7 +644,7 @@ static struct attribute *inputs_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group inputs_attr_group = {
+static const struct attribute_group inputs_attr_group = {
 	.name = "inputs",
 	.attrs = inputs_attrs,
 };
@@ -724,7 +718,8 @@ static int mv_otg_probe(struct platform_device *pdev)
 	otg->set_vbus = mv_otg_set_vbus;
 
 	for (i = 0; i < OTG_TIMER_NUM; i++)
-		init_timer(&mvotg->otg_ctrl.timer[i]);
+		timer_setup(&mvotg->otg_ctrl.timer[i],
+			    mv_otg_timer_await_bcon, 0);
 
 	r = platform_get_resource_byname(mvotg->pdev,
 					 IORESOURCE_MEM, "phyregs");

@@ -492,32 +492,45 @@ static void nvme_nvm_end_io(struct request *rq, blk_status_t status)
 	blk_mq_free_request(rq);
 }
 
+static struct request *nvme_nvm_alloc_request(struct request_queue *q,
+					      struct nvm_rq *rqd,
+					      struct nvme_nvm_command *cmd)
+{
+	struct nvme_ns *ns = q->queuedata;
+	struct request *rq;
+
+	nvme_nvm_rqtocmd(rqd, ns, cmd);
+
+	rq = nvme_alloc_request(q, (struct nvme_command *)cmd, 0, NVME_QID_ANY);
+	if (IS_ERR(rq))
+		return rq;
+
+	rq->cmd_flags &= ~REQ_FAILFAST_DRIVER;
+
+	if (rqd->bio) {
+		blk_init_request_from_bio(rq, rqd->bio);
+	} else {
+		rq->ioprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, IOPRIO_NORM);
+		rq->__data_len = 0;
+	}
+
+	return rq;
+}
+
 static int nvme_nvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
 	struct request_queue *q = dev->q;
-	struct nvme_ns *ns = q->queuedata;
-	struct request *rq;
-	struct bio *bio = rqd->bio;
 	struct nvme_nvm_command *cmd;
+	struct request *rq;
 
 	cmd = kzalloc(sizeof(struct nvme_nvm_command), GFP_KERNEL);
 	if (!cmd)
 		return -ENOMEM;
 
-	nvme_nvm_rqtocmd(rqd, ns, cmd);
-
-	rq = nvme_alloc_request(q, (struct nvme_command *)cmd, 0, NVME_QID_ANY);
+	rq = nvme_nvm_alloc_request(q, rqd, cmd);
 	if (IS_ERR(rq)) {
 		kfree(cmd);
 		return PTR_ERR(rq);
-	}
-	rq->cmd_flags &= ~REQ_FAILFAST_DRIVER;
-
-	if (bio) {
-		blk_init_request_from_bio(rq, bio);
-	} else {
-		rq->ioprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, IOPRIO_NORM);
-		rq->__data_len = 0;
 	}
 
 	rq->end_io_data = rqd;
@@ -525,6 +538,34 @@ static int nvme_nvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 	blk_execute_rq_nowait(q, NULL, rq, 0, nvme_nvm_end_io);
 
 	return 0;
+}
+
+static int nvme_nvm_submit_io_sync(struct nvm_dev *dev, struct nvm_rq *rqd)
+{
+	struct request_queue *q = dev->q;
+	struct request *rq;
+	struct nvme_nvm_command cmd;
+	int ret = 0;
+
+	memset(&cmd, 0, sizeof(struct nvme_nvm_command));
+
+	rq = nvme_nvm_alloc_request(q, rqd, &cmd);
+	if (IS_ERR(rq))
+		return PTR_ERR(rq);
+
+	/* I/Os can fail and the error is signaled through rqd. Callers must
+	 * handle the error accordingly.
+	 */
+	blk_execute_rq(q, NULL, rq, 0);
+	if (nvme_req(rq)->flags & NVME_REQ_CANCELLED)
+		ret = -EINTR;
+
+	rqd->ppa_status = le64_to_cpu(nvme_req(rq)->result.u64);
+	rqd->error = nvme_req(rq)->status;
+
+	blk_mq_free_request(rq);
+
+	return ret;
 }
 
 static void *nvme_nvm_create_dma_pool(struct nvm_dev *nvmdev, char *name)
@@ -562,6 +603,7 @@ static struct nvm_dev_ops nvme_nvm_dev_ops = {
 	.set_bb_tbl		= nvme_nvm_set_bb_tbl,
 
 	.submit_io		= nvme_nvm_submit_io,
+	.submit_io_sync		= nvme_nvm_submit_io_sync,
 
 	.create_dma_pool	= nvme_nvm_create_dma_pool,
 	.destroy_dma_pool	= nvme_nvm_destroy_dma_pool,
@@ -599,8 +641,6 @@ static int nvme_nvm_submit_user_cmd(struct request_queue *q,
 	}
 
 	rq->timeout = timeout ? timeout : ADMIN_TIMEOUT;
-
-	rq->cmd_flags &= ~REQ_FAILFAST_DRIVER;
 
 	if (ppa_buf && ppa_len) {
 		ppa_list = dma_pool_alloc(dev->dma_pool, GFP_KERNEL, &ppa_dma);
@@ -643,17 +683,9 @@ static int nvme_nvm_submit_user_cmd(struct request_queue *q,
 			vcmd->ph_rw.metadata = cpu_to_le64(metadata_dma);
 		}
 
-		if (!disk)
-			goto submit;
-
-		bio->bi_bdev = bdget_disk(disk, 0);
-		if (!bio->bi_bdev) {
-			ret = -ENODEV;
-			goto err_meta;
-		}
+		bio->bi_disk = disk;
 	}
 
-submit:
 	blk_execute_rq(q, NULL, rq, 0);
 
 	if (nvme_req(rq)->flags & NVME_REQ_CANCELLED)
@@ -673,11 +705,8 @@ err_meta:
 	if (meta_buf && meta_len)
 		dma_pool_free(dev->dma_pool, metadata, metadata_dma);
 err_map:
-	if (bio) {
-		if (disk && bio->bi_bdev)
-			bdput(bio->bi_bdev);
+	if (bio)
 		blk_rq_unmap_user(bio);
-	}
 err_ppa:
 	if (ppa_buf && ppa_len)
 		dma_pool_free(dev->dma_pool, ppa_list, ppa_dma);
@@ -965,30 +994,4 @@ void nvme_nvm_unregister_sysfs(struct nvme_ns *ns)
 {
 	sysfs_remove_group(&disk_to_dev(ns->disk)->kobj,
 					&nvm_dev_attr_group);
-}
-
-/* move to shared place when used in multiple places. */
-#define PCI_VENDOR_ID_CNEX 0x1d1d
-#define PCI_DEVICE_ID_CNEX_WL 0x2807
-#define PCI_DEVICE_ID_CNEX_QEMU 0x1f1f
-
-int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id)
-{
-	struct nvme_ctrl *ctrl = ns->ctrl;
-	/* XXX: this is poking into PCI structures from generic code! */
-	struct pci_dev *pdev = to_pci_dev(ctrl->dev);
-
-	/* QEMU NVMe simulator - PCI ID + Vendor specific bit */
-	if (pdev->vendor == PCI_VENDOR_ID_CNEX &&
-				pdev->device == PCI_DEVICE_ID_CNEX_QEMU &&
-							id->vs[0] == 0x1)
-		return 1;
-
-	/* CNEX Labs - PCI ID + Vendor specific bit */
-	if (pdev->vendor == PCI_VENDOR_ID_CNEX &&
-				pdev->device == PCI_DEVICE_ID_CNEX_WL &&
-							id->vs[0] == 0x1)
-		return 1;
-
-	return 0;
 }

@@ -1085,7 +1085,7 @@ static struct attribute *capability_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group capability_attr_grp = {
+static const struct attribute_group capability_attr_grp = {
 	.attrs = capability_attrs,
 };
 
@@ -1151,7 +1151,7 @@ static struct attribute *data_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group data_attr_grp = {
+static const struct attribute_group data_attr_grp = {
 	.attrs = data_attrs,
 };
 
@@ -1343,6 +1343,7 @@ static void usbtmc_interrupt(struct urb *urb)
 	case -EOVERFLOW:
 		dev_err(dev, "overflow with length %d, actual length is %d\n",
 			data->iin_wMaxPacketSize, urb->actual_length);
+		/* fall through */
 	case -ECONNRESET:
 	case -ENOENT:
 	case -ESHUTDOWN:

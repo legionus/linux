@@ -133,7 +133,6 @@ struct btrfs_device {
 
 	struct btrfs_work work;
 	struct rcu_head rcu;
-	struct work_struct rcu_work;
 
 	/* readahead state */
 	spinlock_t reada_lock;
@@ -353,7 +352,6 @@ struct map_lookup {
 	int io_align;
 	int io_width;
 	u64 stripe_len;
-	int sector_size;
 	int num_stripes;
 	int sub_stripes;
 	struct btrfs_bio_stripe stripes[];
@@ -481,9 +479,8 @@ void btrfs_init_dev_replace_tgtdev_for_resume(struct btrfs_fs_info *fs_info,
 					      struct btrfs_device *tgtdev);
 void btrfs_scratch_superblocks(struct block_device *bdev, const char *device_path);
 int btrfs_is_parity_mirror(struct btrfs_fs_info *fs_info,
-			   u64 logical, u64 len, int mirror_num);
+			   u64 logical, u64 len);
 unsigned long btrfs_full_stripe_len(struct btrfs_fs_info *fs_info,
-				    struct btrfs_mapping_tree *map_tree,
 				    u64 logical);
 int btrfs_finish_chunk_alloc(struct btrfs_trans_handle *trans,
 				struct btrfs_fs_info *fs_info,
@@ -491,15 +488,16 @@ int btrfs_finish_chunk_alloc(struct btrfs_trans_handle *trans,
 int btrfs_remove_chunk(struct btrfs_trans_handle *trans,
 		       struct btrfs_fs_info *fs_info, u64 chunk_offset);
 
-static inline int btrfs_dev_stats_dirty(struct btrfs_device *dev)
-{
-	return atomic_read(&dev->dev_stats_ccnt);
-}
-
 static inline void btrfs_dev_stat_inc(struct btrfs_device *dev,
 				      int index)
 {
 	atomic_inc(dev->dev_stat_values + index);
+	/*
+	 * This memory barrier orders stores updating statistics before stores
+	 * updating dev_stats_ccnt.
+	 *
+	 * It pairs with smp_rmb() in btrfs_run_dev_stats().
+	 */
 	smp_mb__before_atomic();
 	atomic_inc(&dev->dev_stats_ccnt);
 }
@@ -516,7 +514,13 @@ static inline int btrfs_dev_stat_read_and_reset(struct btrfs_device *dev,
 	int ret;
 
 	ret = atomic_xchg(dev->dev_stat_values + index, 0);
-	smp_mb__before_atomic();
+	/*
+	 * atomic_xchg implies a full memory barriers as per atomic_t.txt:
+	 * - RMW operations that have a return value are fully ordered;
+	 *
+	 * This implicit memory barriers is paired with the smp_rmb in
+	 * btrfs_run_dev_stats
+	 */
 	atomic_inc(&dev->dev_stats_ccnt);
 	return ret;
 }
@@ -525,6 +529,12 @@ static inline void btrfs_dev_stat_set(struct btrfs_device *dev,
 				      int index, unsigned long val)
 {
 	atomic_set(dev->dev_stat_values + index, val);
+	/*
+	 * This memory barrier orders stores updating statistics before stores
+	 * updating dev_stats_ccnt.
+	 *
+	 * It pairs with smp_rmb() in btrfs_run_dev_stats().
+	 */
 	smp_mb__before_atomic();
 	atomic_inc(&dev->dev_stats_ccnt);
 }
@@ -542,5 +552,7 @@ void btrfs_update_commit_device_bytes_used(struct btrfs_fs_info *fs_info,
 struct list_head *btrfs_get_fs_uuids(void);
 void btrfs_set_fs_info_ptr(struct btrfs_fs_info *fs_info);
 void btrfs_reset_fs_info_ptr(struct btrfs_fs_info *fs_info);
+
+bool btrfs_check_rw_degradable(struct btrfs_fs_info *fs_info);
 
 #endif

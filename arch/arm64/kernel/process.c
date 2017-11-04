@@ -170,6 +170,39 @@ void machine_restart(char *cmd)
 	while (1);
 }
 
+static void print_pstate(struct pt_regs *regs)
+{
+	u64 pstate = regs->pstate;
+
+	if (compat_user_mode(regs)) {
+		printk("pstate: %08llx (%c%c%c%c %c %s %s %c%c%c)\n",
+			pstate,
+			pstate & COMPAT_PSR_N_BIT ? 'N' : 'n',
+			pstate & COMPAT_PSR_Z_BIT ? 'Z' : 'z',
+			pstate & COMPAT_PSR_C_BIT ? 'C' : 'c',
+			pstate & COMPAT_PSR_V_BIT ? 'V' : 'v',
+			pstate & COMPAT_PSR_Q_BIT ? 'Q' : 'q',
+			pstate & COMPAT_PSR_T_BIT ? "T32" : "A32",
+			pstate & COMPAT_PSR_E_BIT ? "BE" : "LE",
+			pstate & COMPAT_PSR_A_BIT ? 'A' : 'a',
+			pstate & COMPAT_PSR_I_BIT ? 'I' : 'i',
+			pstate & COMPAT_PSR_F_BIT ? 'F' : 'f');
+	} else {
+		printk("pstate: %08llx (%c%c%c%c %c%c%c%c %cPAN %cUAO)\n",
+			pstate,
+			pstate & PSR_N_BIT ? 'N' : 'n',
+			pstate & PSR_Z_BIT ? 'Z' : 'z',
+			pstate & PSR_C_BIT ? 'C' : 'c',
+			pstate & PSR_V_BIT ? 'V' : 'v',
+			pstate & PSR_D_BIT ? 'D' : 'd',
+			pstate & PSR_A_BIT ? 'A' : 'a',
+			pstate & PSR_I_BIT ? 'I' : 'i',
+			pstate & PSR_F_BIT ? 'F' : 'f',
+			pstate & PSR_PAN_BIT ? '+' : '-',
+			pstate & PSR_UAO_BIT ? '+' : '-');
+	}
+}
+
 void __show_regs(struct pt_regs *regs)
 {
 	int i, top_reg;
@@ -186,10 +219,9 @@ void __show_regs(struct pt_regs *regs)
 	}
 
 	show_regs_print_info(KERN_DEFAULT);
-	print_symbol("PC is at %s\n", instruction_pointer(regs));
-	print_symbol("LR is at %s\n", lr);
-	printk("pc : [<%016llx>] lr : [<%016llx>] pstate: %08llx\n",
-	       regs->pc, lr, regs->pstate);
+	print_pstate(regs);
+	print_symbol("pc : %s\n", regs->pc);
+	print_symbol("lr : %s\n", lr);
 	printk("sp : %016llx\n", sp);
 
 	i = top_reg;
@@ -360,6 +392,8 @@ __notrace_funcgraph struct task_struct *__switch_to(struct task_struct *prev,
 	/*
 	 * Complete any pending TLB or cache maintenance on this CPU in case
 	 * the thread migrates to a different CPU.
+	 * This full barrier is also required by the membarrier system
+	 * call.
 	 */
 	dsb(ish);
 
@@ -382,15 +416,12 @@ unsigned long get_wchan(struct task_struct *p)
 		return 0;
 
 	frame.fp = thread_saved_fp(p);
-	frame.sp = thread_saved_sp(p);
 	frame.pc = thread_saved_pc(p);
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	frame.graph = p->curr_ret_stack;
 #endif
 	do {
-		if (frame.sp < stack_page ||
-		    frame.sp >= stack_page + THREAD_SIZE ||
-		    unwind_frame(p, &frame))
+		if (unwind_frame(p, &frame))
 			goto out;
 		if (!in_sched_functions(frame.pc)) {
 			ret = frame.pc;
@@ -416,4 +447,12 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 		return randomize_page(mm->brk, SZ_32M);
 	else
 		return randomize_page(mm->brk, SZ_1G);
+}
+
+/*
+ * Called from setup_new_exec() after (COMPAT_)SET_PERSONALITY.
+ */
+void arch_setup_new_exec(void)
+{
+	current->mm->context.flags = is_compat_task() ? MMCF_AARCH32 : 0;
 }

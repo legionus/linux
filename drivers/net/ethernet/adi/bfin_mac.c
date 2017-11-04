@@ -986,7 +986,7 @@ static int bfin_ptp_enable(struct ptp_clock_info *ptp,
 	return -EOPNOTSUPP;
 }
 
-static struct ptp_clock_info bfin_ptp_caps = {
+static const struct ptp_clock_info bfin_ptp_caps = {
 	.owner		= THIS_MODULE,
 	.name		= "BF518 clock",
 	.max_adj	= 0,
@@ -1650,9 +1650,8 @@ static int bfin_mac_probe(struct platform_device *pdev)
 	ndev->netdev_ops = &bfin_mac_netdev_ops;
 	ndev->ethtool_ops = &bfin_mac_ethtool_ops;
 
-	init_timer(&lp->tx_reclaim_timer);
-	lp->tx_reclaim_timer.data = (unsigned long)lp;
-	lp->tx_reclaim_timer.function = tx_reclaim_skb_timeout;
+	setup_timer(&lp->tx_reclaim_timer, tx_reclaim_skb_timeout,
+		    (unsigned long)lp);
 
 	lp->flags = 0;
 	netif_napi_add(ndev, &lp->napi, bfin_mac_poll, CONFIG_BFIN_RX_DESC_NUM);

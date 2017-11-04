@@ -46,7 +46,6 @@
 struct xt_connlimit_conn {
 	struct hlist_node		node;
 	struct nf_conntrack_tuple	tuple;
-	union nf_inet_addr		addr;
 };
 
 struct xt_connlimit_rb {
@@ -58,8 +57,7 @@ struct xt_connlimit_rb {
 static spinlock_t xt_connlimit_locks[CONNLIMIT_LOCK_SLOTS] __cacheline_aligned_in_smp;
 
 struct xt_connlimit_data {
-	struct rb_root climit_root4[CONNLIMIT_SLOTS];
-	struct rb_root climit_root6[CONNLIMIT_SLOTS];
+	struct rb_root climit_root[CONNLIMIT_SLOTS];
 };
 
 static u_int32_t connlimit_rnd __read_mostly;
@@ -126,7 +124,6 @@ static bool add_hlist(struct hlist_head *head,
 	if (conn == NULL)
 		return false;
 	conn->tuple = *tuple;
-	conn->addr = *addr;
 	hlist_add_head(&conn->node, head);
 	return true;
 }
@@ -144,7 +141,6 @@ static unsigned int check_hlist(struct net *net,
 	unsigned int length = 0;
 
 	*addit = true;
-	rcu_read_lock();
 
 	/* check the saved connections */
 	hlist_for_each_entry_safe(conn, n, head, node) {
@@ -178,8 +174,6 @@ static unsigned int check_hlist(struct net *net,
 		nf_ct_put(found_ct);
 		length++;
 	}
-
-	rcu_read_unlock();
 
 	return length;
 }
@@ -274,7 +268,6 @@ count_tree(struct net *net, struct rb_root *root,
 	}
 
 	conn->tuple = *tuple;
-	conn->addr = *addr;
 	rbconn->addr = *addr;
 
 	INIT_HLIST_HEAD(&rbconn->hhead);
@@ -297,13 +290,11 @@ static int count_them(struct net *net,
 	int count;
 	u32 hash;
 
-	if (family == NFPROTO_IPV6) {
+	if (family == NFPROTO_IPV6)
 		hash = connlimit_iphash6(addr, mask);
-		root = &data->climit_root6[hash];
-	} else {
+	else
 		hash = connlimit_iphash(addr->ip & mask->ip);
-		root = &data->climit_root4[hash];
-	}
+	root = &data->climit_root[hash];
 
 	spin_lock_bh(&xt_connlimit_locks[hash % CONNLIMIT_LOCK_SLOTS]);
 
@@ -382,10 +373,8 @@ static int connlimit_mt_check(const struct xt_mtchk_param *par)
 		return -ENOMEM;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(info->data->climit_root4); ++i)
-		info->data->climit_root4[i] = RB_ROOT;
-	for (i = 0; i < ARRAY_SIZE(info->data->climit_root6); ++i)
-		info->data->climit_root6[i] = RB_ROOT;
+	for (i = 0; i < ARRAY_SIZE(info->data->climit_root); ++i)
+		info->data->climit_root[i] = RB_ROOT;
 
 	return 0;
 }
@@ -416,10 +405,8 @@ static void connlimit_mt_destroy(const struct xt_mtdtor_param *par)
 
 	nf_ct_netns_put(par->net, par->family);
 
-	for (i = 0; i < ARRAY_SIZE(info->data->climit_root4); ++i)
-		destroy_tree(&info->data->climit_root4[i]);
-	for (i = 0; i < ARRAY_SIZE(info->data->climit_root6); ++i)
-		destroy_tree(&info->data->climit_root6[i]);
+	for (i = 0; i < ARRAY_SIZE(info->data->climit_root); ++i)
+		destroy_tree(&info->data->climit_root[i]);
 
 	kfree(info->data);
 }

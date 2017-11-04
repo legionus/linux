@@ -208,12 +208,6 @@ static const struct bxt_ddi_phy_info glk_ddi_phy_info[] = {
 	},
 };
 
-static u32 bxt_phy_port_mask(const struct bxt_ddi_phy_info *phy_info)
-{
-	return (phy_info->dual_channel * BIT(phy_info->channel[DPIO_CH1].port)) |
-		BIT(phy_info->channel[DPIO_CH0].port);
-}
-
 static const struct bxt_ddi_phy_info *
 bxt_get_phy_list(struct drm_i915_private *dev_priv, int *count)
 {
@@ -313,7 +307,6 @@ bool bxt_ddi_phy_is_enabled(struct drm_i915_private *dev_priv,
 			    enum dpio_phy phy)
 {
 	const struct bxt_ddi_phy_info *phy_info;
-	enum port port;
 
 	phy_info = bxt_get_phy_info(dev_priv, phy);
 
@@ -333,19 +326,6 @@ bool bxt_ddi_phy_is_enabled(struct drm_i915_private *dev_priv,
 				 phy);
 
 		return false;
-	}
-
-	for_each_port_masked(port, bxt_phy_port_mask(phy_info)) {
-		u32 tmp = I915_READ(BXT_PHY_CTL(port));
-
-		if (tmp & BXT_PHY_CMNLANE_POWERDOWN_ACK) {
-			DRM_DEBUG_DRIVER("DDI PHY %d powered, but common lane "
-					 "for port %c powered down "
-					 "(PHY_CTL %08x)\n",
-					 phy, port_name(port), tmp);
-
-			return false;
-		}
 	}
 
 	return true;
@@ -587,8 +567,7 @@ bool bxt_ddi_phy_verify_state(struct drm_i915_private *dev_priv,
 }
 
 uint8_t
-bxt_ddi_phy_calc_lane_lat_optim_mask(struct intel_encoder *encoder,
-				     uint8_t lane_count)
+bxt_ddi_phy_calc_lane_lat_optim_mask(uint8_t lane_count)
 {
 	switch (lane_count) {
 	case 1:

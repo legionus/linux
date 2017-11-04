@@ -25,6 +25,7 @@
 #include "trans.h"
 #include "util.h"
 #include "event.h"
+#include "qlink_util.h"
 
 static int
 qtnf_event_handle_sta_assoc(struct qtnf_wmac *mac, struct qtnf_vif *vif,
@@ -48,12 +49,6 @@ qtnf_event_handle_sta_assoc(struct qtnf_wmac *mac, struct qtnf_vif *vif,
 
 	if (vif->wdev.iftype != NL80211_IFTYPE_AP) {
 		pr_err("VIF%u.%u: STA_ASSOC event when not in AP mode\n",
-		       mac->macid, vif->vifid);
-		return -EPROTO;
-	}
-
-	if (!(vif->bss_status & QTNF_STATE_AP_START)) {
-		pr_err("VIF%u.%u: STA_ASSOC event when AP is not started\n",
 		       mac->macid, vif->vifid);
 		return -EPROTO;
 	}
@@ -122,12 +117,6 @@ qtnf_event_handle_sta_deauth(struct qtnf_wmac *mac, struct qtnf_vif *vif,
 
 	if (vif->wdev.iftype != NL80211_IFTYPE_AP) {
 		pr_err("VIF%u.%u: STA_DEAUTH event when not in AP mode\n",
-		       mac->macid, vif->vifid);
-		return -EPROTO;
-	}
-
-	if (!(vif->bss_status & QTNF_STATE_AP_START)) {
-		pr_err("VIF%u.%u: STA_DEAUTH event when AP is not started\n",
 		       mac->macid, vif->vifid);
 		return -EPROTO;
 	}
@@ -211,8 +200,8 @@ qtnf_event_handle_bss_leave(struct qtnf_vif *vif,
 
 	pr_debug("VIF%u.%u: disconnected\n", vif->mac->macid, vif->vifid);
 
-	cfg80211_disconnected(vif->netdev, leave_info->reason, NULL, 0, 0,
-			      GFP_KERNEL);
+	cfg80211_disconnected(vif->netdev, le16_to_cpu(leave_info->reason),
+			      NULL, 0, 0, GFP_KERNEL);
 
 	vif->sta_state = QTNF_STA_DISCONNECTED;
 	netif_carrier_off(vif->netdev);
@@ -350,6 +339,52 @@ qtnf_event_handle_scan_complete(struct qtnf_wmac *mac,
 	return 0;
 }
 
+static int
+qtnf_event_handle_freq_change(struct qtnf_wmac *mac,
+			      const struct qlink_event_freq_change *data,
+			      u16 len)
+{
+	struct wiphy *wiphy = priv_to_wiphy(mac);
+	struct cfg80211_chan_def chandef;
+	struct qtnf_vif *vif;
+	int i;
+
+	if (len < sizeof(*data)) {
+		pr_err("MAC%u: payload is too short\n", mac->macid);
+		return -EINVAL;
+	}
+
+	if (!wiphy->registered)
+		return 0;
+
+	qlink_chandef_q2cfg(wiphy, &data->chan, &chandef);
+
+	if (!cfg80211_chandef_valid(&chandef)) {
+		pr_err("MAC%u: bad channel f1=%u f2=%u bw=%u\n", mac->macid,
+		       chandef.center_freq1, chandef.center_freq2,
+		       chandef.width);
+		return -EINVAL;
+	}
+
+	pr_debug("MAC%d: new channel ieee=%u freq1=%u freq2=%u bw=%u\n",
+		 mac->macid, chandef.chan->hw_value, chandef.center_freq1,
+		 chandef.center_freq2, chandef.width);
+
+	for (i = 0; i < QTNF_MAX_INTF; i++) {
+		vif = &mac->iflist[i];
+		if (vif->wdev.iftype == NL80211_IFTYPE_UNSPECIFIED)
+			continue;
+
+		if (vif->netdev) {
+			mutex_lock(&vif->wdev.mtx);
+			cfg80211_ch_switch_notify(vif->netdev, &chandef);
+			mutex_unlock(&vif->wdev.mtx);
+		}
+	}
+
+	return 0;
+}
+
 static int qtnf_event_parse(struct qtnf_wmac *mac,
 			    const struct sk_buff *event_skb)
 {
@@ -399,6 +434,10 @@ static int qtnf_event_parse(struct qtnf_wmac *mac,
 	case QLINK_EVENT_BSS_LEAVE:
 		ret = qtnf_event_handle_bss_leave(vif, (const void *)event,
 						  event_len);
+		break;
+	case QLINK_EVENT_FREQ_CHANGE:
+		ret = qtnf_event_handle_freq_change(mac, (const void *)event,
+						    event_len);
 		break;
 	default:
 		pr_warn("unknown event type: %x\n", event_id);

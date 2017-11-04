@@ -40,8 +40,7 @@
 #include "usbatm.h"
 
 #define DRIVER_AUTHOR	"Johan Verrept, Duncan Sands <duncan.sands@free.fr>"
-#define DRIVER_VERSION	"1.10"
-#define DRIVER_DESC	"Alcatel SpeedTouch USB driver version " DRIVER_VERSION
+#define DRIVER_DESC	"Alcatel SpeedTouch USB driver"
 
 static const char speedtch_driver_name[] = "speedtch";
 
@@ -738,7 +737,7 @@ static int speedtch_post_reset(struct usb_interface *intf)
 **  USB  **
 **********/
 
-static struct usb_device_id speedtch_usb_ids[] = {
+static const struct usb_device_id speedtch_usb_ids[] = {
 	{USB_DEVICE(0x06b9, 0x4061)},
 	{}
 };
@@ -875,16 +874,13 @@ static int speedtch_bind(struct usbatm_data *usbatm,
 	usbatm->flags |= (use_isoc ? UDSL_USE_ISOC : 0);
 
 	INIT_WORK(&instance->status_check_work, speedtch_check_status);
-	init_timer(&instance->status_check_timer);
-
-	instance->status_check_timer.function = speedtch_status_poll;
-	instance->status_check_timer.data = (unsigned long)instance;
+	setup_timer(&instance->status_check_timer, speedtch_status_poll,
+		    (unsigned long)instance);
 	instance->last_status = 0xff;
 	instance->poll_delay = MIN_POLL_DELAY;
 
-	init_timer(&instance->resubmit_timer);
-	instance->resubmit_timer.function = speedtch_resubmit_int;
-	instance->resubmit_timer.data = (unsigned long)instance;
+	setup_timer(&instance->resubmit_timer, speedtch_resubmit_int,
+		    (unsigned long)instance);
 
 	instance->int_urb = usb_alloc_urb(0, GFP_KERNEL);
 
@@ -962,4 +958,3 @@ module_usb_driver(speedtch_usb_driver);
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
-MODULE_VERSION(DRIVER_VERSION);
