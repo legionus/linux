@@ -19,7 +19,9 @@ enum { /* definitions for 'hidepid' mount option */
 };
 
 struct proc_fs_info {
+	struct super_block *sb;
 	struct pid_namespace *pid_ns;
+	struct list_head pidns_entry; /* Node in procfs_mounts of pidns */
 	struct dentry *proc_self; /* For /proc/self/ */
 	struct dentry *proc_thread_self; /* For /proc/thread-self/ */
 	bool newinstance; /* Flag for new separated instances */
