@@ -28,13 +28,14 @@
 #include "internal.h"
 
 enum {
-	Opt_gid, Opt_hidepid, Opt_newinstance, Opt_err,
+	Opt_gid, Opt_hidepid, Opt_newinstance, Opt_pids, Opt_err,
 };
 
 static const match_table_t tokens = {
 	{Opt_hidepid, "hidepid=%u"},
 	{Opt_gid, "gid=%u"},
 	{Opt_newinstance, "newinstance"},
+	{Opt_pids, "pids=%s"},
 	{Opt_err, NULL},
 };
 
@@ -67,6 +68,7 @@ int proc_parse_early_options(char *options, struct proc_fs_info *fs_info)
 			break;
 		case Opt_gid:
 		case Opt_hidepid:
+		case Opt_pids:
 			break;
 		default:
 			pr_err("proc: unrecognized mount option \"%s\" "
@@ -83,7 +85,7 @@ int proc_parse_options(char *options, struct proc_fs_info *fs_info)
 {
 	char *p;
 	substring_t args[MAX_OPT_ARGS];
-	int option;
+	int option, ret = 0;
 	kgid_t gid;
 
 	if (!options)
@@ -118,6 +120,19 @@ int proc_parse_options(char *options, struct proc_fs_info *fs_info)
 			proc_fs_set_hide_pid(fs_info, option);
 			break;
 		case Opt_newinstance:
+			break;
+		case Opt_pids:
+			if (strcmp(args[0].from, "all") == 0)
+				ret = proc_fs_set_pids(fs_info, HIDEPID_OFF);
+			else if (strcmp(args[0].from, "ptraceable") == 0)
+				ret = proc_fs_set_pids(fs_info, HIDEPID_INVISIBLE);
+			else
+				ret = -EINVAL;
+
+			if (ret < 0) {
+				pr_err("proc: invalid 'pids' mount option.\n");
+				return 0;
+			}
 			break;
 		default:
 			pr_err("proc: unrecognized mount option \"%s\" "
@@ -188,6 +203,7 @@ static struct dentry *proc_mount(struct file_system_type *fs_type,
 
 	/* Set it as early as possible */
 	proc_fs_set_newinstance(fs_info, false);
+	proc_fs_set_pids(fs_info, HIDEPID_OFF);
 
 	if (flags & SB_KERNMOUNT) {
 		ns = data;

@@ -686,13 +686,24 @@ static bool has_pid_permissions(struct proc_fs_info *fs_info,
 				 struct task_struct *task,
 				 int hide_pid_min)
 {
-	int hide_pid = proc_fs_hide_pid(fs_info);
-	kgid_t gid = proc_fs_pid_gid(fs_info);
+	int pids = proc_fs_pids(fs_info);
 
-	if (hide_pid < hide_pid_min)
-		return true;
-	if (in_group_p(gid))
-		return true;
+	/*
+	 * If 'pids=all' or if it was not set then lets fallback
+	 * to 'hidepid' and 'gid', if those are not enforced too, then
+	 * ptrace checks are skipped. Otherwise ptrace permission is
+	 * required for all other cases.
+	 */
+	if (pids == HIDEPID_OFF) {
+		int hide_pid = proc_fs_hide_pid(fs_info);
+		kgid_t gid = proc_fs_pid_gid(fs_info);
+
+		if (hide_pid < hide_pid_min)
+			return true;
+
+		if (in_group_p(gid))
+			return true;
+	}
 	return ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS);
 }
 
@@ -701,6 +712,7 @@ static int proc_pid_permission(struct inode *inode, int mask)
 {
 	struct proc_fs_info *fs_info = proc_sb(inode->i_sb);
 	int hide_pid = proc_fs_hide_pid(fs_info);
+	int pids = proc_fs_pids(fs_info);
 	struct task_struct *task;
 	bool has_perms;
 
@@ -711,7 +723,8 @@ static int proc_pid_permission(struct inode *inode, int mask)
 	put_task_struct(task);
 
 	if (!has_perms) {
-		if (hide_pid == HIDEPID_INVISIBLE) {
+		if (pids == HIDEPID_INVISIBLE ||
+		    hide_pid == HIDEPID_INVISIBLE) {
 			/*
 			 * Let's make getdents(), stat(), and open()
 			 * consistent with each other.  If a process
@@ -3140,6 +3153,7 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, unsign
 	unsigned tgid;
 	struct proc_fs_info *fs_info = proc_sb(dir->i_sb);
 	struct pid_namespace *ns = fs_info->pid_ns;
+	int pids = proc_fs_pids(fs_info);
 
 	tgid = name_to_int(&dentry->d_name);
 	if (tgid == ~0U)
@@ -3153,7 +3167,15 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, unsign
 	if (!task)
 		goto out;
 
+	/* Limit procfs to only ptraceable tasks */
+	if (pids != HIDEPID_OFF) {
+		cond_resched();
+		if (!has_pid_permissions(fs_info, task, HIDEPID_NO_ACCESS))
+			goto out_put_task;
+	}
+
 	result = proc_pid_instantiate(dir, dentry, task, NULL);
+out_put_task:
 	put_task_struct(task);
 out:
 	return ERR_PTR(result);

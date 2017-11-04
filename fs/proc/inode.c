@@ -108,8 +108,12 @@ static int proc_show_options(struct seq_file *seq, struct dentry *root)
 	int hide_pid = proc_fs_hide_pid(fs_info);
 	kgid_t pid_gid = proc_fs_pid_gid(fs_info);
 
-	if (proc_fs_newinstance(fs_info))
+	if (proc_fs_newinstance(fs_info)) {
+		int pids = proc_fs_pids(fs_info);
+
 		seq_printf(seq, ",newinstance");
+		seq_printf(seq, ",pids=%s", pids == HIDEPID_OFF ? "all" : "ptraceable");
+	}
 
 	if (!gid_eq(pid_gid, GLOBAL_ROOT_GID))
 		seq_printf(seq, ",gid=%u", from_kgid_munged(current_user_ns(),pid_gid));
