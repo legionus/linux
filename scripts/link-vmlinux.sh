@@ -258,10 +258,12 @@ if [ -n "${CONFIG_KALLSYMS}" ]; then
 
 	# step 1
 	vmlinux_link "" .tmp_vmlinux1
+	"${OBJCOPY}" -R .modinfo .tmp_vmlinux1
 	kallsyms .tmp_vmlinux1 .tmp_kallsyms1.o
 
 	# step 2
 	vmlinux_link .tmp_kallsyms1.o .tmp_vmlinux2
+	"${OBJCOPY}" -R .modinfo .tmp_vmlinux2
 	kallsyms .tmp_vmlinux2 .tmp_kallsyms2.o
 
 	# step 3
@@ -273,6 +275,7 @@ if [ -n "${CONFIG_KALLSYMS}" ]; then
 		kallsyms_vmlinux=.tmp_vmlinux3
 
 		vmlinux_link .tmp_kallsyms2.o .tmp_vmlinux3
+		"${OBJCOPY}" -R .modinfo .tmp_vmlinux3
 
 		kallsyms .tmp_vmlinux3 .tmp_kallsyms3.o
 	fi
@@ -280,6 +283,11 @@ fi
 
 info LD vmlinux
 vmlinux_link "${kallsymso}" vmlinux
+
+info MODINFO kernel.builtin.modinfo
+"${OBJCOPY}" -j .modinfo -O binary vmlinux kernel.builtin.modinfo
+chmod 444 kernel.builtin.modinfo
+"${OBJCOPY}" -R .modinfo vmlinux
 
 if [ -n "${CONFIG_BUILDTIME_EXTABLE_SORT}" ]; then
 	info SORTEX vmlinux
