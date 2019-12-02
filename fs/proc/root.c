@@ -30,7 +30,7 @@
 #include "internal.h"
 
 struct proc_fs_context {
-	struct pid_namespace	*pid_ns;
+	struct proc_fs_info	*fs_info;
 	unsigned int		mask;
 	int			hidepid;
 	int			gid;
@@ -97,7 +97,8 @@ static void proc_apply_options(struct super_block *s,
 
 static int proc_fill_super(struct super_block *s, struct fs_context *fc)
 {
-	struct pid_namespace *pid_ns = get_pid_ns(s->s_fs_info);
+	struct proc_fs_context *ctx = fc->fs_private;
+	struct pid_namespace *pid_ns = get_pid_ns(ctx->fs_info->pid_ns);
 	struct inode *root_inode;
 	int ret;
 
@@ -145,7 +146,8 @@ static int proc_fill_super(struct super_block *s, struct fs_context *fc)
 static int proc_reconfigure(struct fs_context *fc)
 {
 	struct super_block *sb = fc->root->d_sb;
-	struct pid_namespace *pid = sb->s_fs_info;
+	struct proc_fs_info *fs_info = proc_sb_info(sb);
+	struct pid_namespace *pid = fs_info->pid_ns;
 
 	sync_filesystem(sb);
 
@@ -157,14 +159,14 @@ static int proc_get_tree(struct fs_context *fc)
 {
 	struct proc_fs_context *ctx = fc->fs_private;
 
-	return get_tree_keyed(fc, proc_fill_super, ctx->pid_ns);
+	return get_tree_keyed(fc, proc_fill_super, ctx->fs_info);
 }
 
 static void proc_fs_context_free(struct fs_context *fc)
 {
 	struct proc_fs_context *ctx = fc->fs_private;
 
-	put_pid_ns(ctx->pid_ns);
+	put_pid_ns(ctx->fs_info->pid_ns);
 	kfree(ctx);
 }
 
@@ -178,14 +180,27 @@ static const struct fs_context_operations proc_fs_context_ops = {
 static int proc_init_fs_context(struct fs_context *fc)
 {
 	struct proc_fs_context *ctx;
+	struct pid_namespace *pid_ns;
 
 	ctx = kzalloc(sizeof(struct proc_fs_context), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 
-	ctx->pid_ns = get_pid_ns(task_active_pid_ns(current));
+	pid_ns = get_pid_ns(task_active_pid_ns(current));
+
+	if (!pid_ns->proc_mnt) {
+		ctx->fs_info = kzalloc(sizeof(struct proc_fs_info), GFP_KERNEL);
+		if (!ctx->fs_info) {
+			kfree(ctx);
+			return -ENOMEM;
+		}
+		ctx->fs_info->pid_ns = pid_ns;
+	} else {
+		ctx->fs_info = proc_sb_info(pid_ns->proc_mnt->mnt_sb);
+	}
+
 	put_user_ns(fc->user_ns);
-	fc->user_ns = get_user_ns(ctx->pid_ns->user_ns);
+	fc->user_ns = get_user_ns(ctx->fs_info->pid_ns->user_ns);
 	fc->fs_private = ctx;
 	fc->ops = &proc_fs_context_ops;
 	return 0;
@@ -193,15 +208,15 @@ static int proc_init_fs_context(struct fs_context *fc)
 
 static void proc_kill_sb(struct super_block *sb)
 {
-	struct pid_namespace *ns;
+	struct proc_fs_info *fs_info = proc_sb_info(sb);
 
-	ns = (struct pid_namespace *)sb->s_fs_info;
-	if (ns->proc_self)
-		dput(ns->proc_self);
-	if (ns->proc_thread_self)
-		dput(ns->proc_thread_self);
+	if (fs_info->pid_ns->proc_self)
+		dput(fs_info->pid_ns->proc_self);
+	if (fs_info->pid_ns->proc_thread_self)
+		dput(fs_info->pid_ns->proc_thread_self);
 	kill_anon_super(sb);
-	put_pid_ns(ns);
+	put_pid_ns(fs_info->pid_ns);
+	kfree(fs_info);
 }
 
 static struct file_system_type proc_fs_type = {
@@ -314,10 +329,10 @@ int pid_ns_prepare_proc(struct pid_namespace *ns)
 	}
 
 	ctx = fc->fs_private;
-	if (ctx->pid_ns != ns) {
-		put_pid_ns(ctx->pid_ns);
+	if (ctx->fs_info->pid_ns != ns) {
+		put_pid_ns(ctx->fs_info->pid_ns);
 		get_pid_ns(ns);
-		ctx->pid_ns = ns;
+		ctx->fs_info->pid_ns = ns;
 	}
 
 	mnt = fc_mount(fc);

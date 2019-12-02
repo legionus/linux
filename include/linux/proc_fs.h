@@ -12,9 +12,18 @@ struct proc_dir_entry;
 struct seq_file;
 struct seq_operations;
 
+struct proc_fs_info {
+	struct pid_namespace *pid_ns;
+};
+
 #ifdef CONFIG_PROC_FS
 
 typedef int (*proc_write_t)(struct file *, char *, size_t);
+
+static inline struct proc_fs_info *proc_sb_info(struct super_block *sb)
+{
+	return sb->s_fs_info;
+}
 
 extern void proc_root_init(void);
 extern void proc_flush_task(struct task_struct *);
@@ -86,6 +95,11 @@ int proc_pid_arch_status(struct seq_file *m, struct pid_namespace *ns,
 
 #else /* CONFIG_PROC_FS */
 
+static inline struct proc_fs_info *proc_sb_info(struct super_block *sb)
+{
+	return NULL;
+}
+
 static inline void proc_root_init(void)
 {
 }
@@ -146,7 +160,7 @@ int open_related_ns(struct ns_common *ns,
 /* get the associated pid namespace for a file in procfs */
 static inline struct pid_namespace *proc_pid_ns(const struct inode *inode)
 {
-	return inode->i_sb->s_fs_info;
+	return proc_sb_info(inode->i_sb)->pid_ns;
 }
 
 #endif /* _LINUX_PROC_FS_H */
