@@ -82,7 +82,7 @@ static int proc_parse_param(struct fs_context *fc, struct fs_parameter *param)
 	return 0;
 }
 
-static void proc_apply_options(struct super_block *s,
+static void proc_apply_options(struct proc_fs_info *fs_info,
 			       struct fs_context *fc,
 			       struct pid_namespace *pid_ns,
 			       struct user_namespace *user_ns)
@@ -90,15 +90,17 @@ static void proc_apply_options(struct super_block *s,
 	struct proc_fs_context *ctx = fc->fs_private;
 
 	if (pid_ns->proc_mnt) {
-		struct proc_fs_info *fs_info = proc_sb_info(pid_ns->proc_mnt->mnt_sb);
-		proc_fs_set_pid_gid(ctx->fs_info, proc_fs_pid_gid(fs_info));
-		proc_fs_set_hide_pid(ctx->fs_info, proc_fs_hide_pid(fs_info));
+		struct proc_fs_info *pidns_fs_info = proc_sb_info(pid_ns->proc_mnt->mnt_sb);
+
+		proc_fs_set_pid_gid(fs_info, proc_fs_pid_gid(pidns_fs_info));
+		proc_fs_set_hide_pid(fs_info, proc_fs_hide_pid(pidns_fs_info));
 	}
 
 	if (ctx->mask & (1 << Opt_gid))
-		proc_fs_set_pid_gid(ctx->fs_info, make_kgid(user_ns, ctx->gid));
+		proc_fs_set_pid_gid(fs_info, make_kgid(user_ns, ctx->gid));
+
 	if (ctx->mask & (1 << Opt_hidepid))
-		proc_fs_set_hide_pid(ctx->fs_info, ctx->hidepid);
+		proc_fs_set_hide_pid(fs_info, ctx->hidepid);
 }
 
 static int proc_fill_super(struct super_block *s, struct fs_context *fc)
@@ -108,7 +110,7 @@ static int proc_fill_super(struct super_block *s, struct fs_context *fc)
 	struct inode *root_inode;
 	int ret;
 
-	proc_apply_options(s, fc, pid_ns, current_user_ns());
+	proc_apply_options(ctx->fs_info, fc, pid_ns, current_user_ns());
 
 	/* User space would break if executables or devices appear on proc */
 	s->s_iflags |= SB_I_USERNS_VISIBLE | SB_I_NOEXEC | SB_I_NODEV;
@@ -118,6 +120,7 @@ static int proc_fill_super(struct super_block *s, struct fs_context *fc)
 	s->s_magic = PROC_SUPER_MAGIC;
 	s->s_op = &proc_sops;
 	s->s_time_gran = 1;
+	s->s_fs_info = ctx->fs_info;
 
 	/*
 	 * procfs isn't actually a stacking filesystem; however, there is
@@ -157,15 +160,13 @@ static int proc_reconfigure(struct fs_context *fc)
 
 	sync_filesystem(sb);
 
-	proc_apply_options(sb, fc, pid, current_user_ns());
+	proc_apply_options(fs_info, fc, pid, current_user_ns());
 	return 0;
 }
 
 static int proc_get_tree(struct fs_context *fc)
 {
-	struct proc_fs_context *ctx = fc->fs_private;
-
-	return get_tree_keyed(fc, proc_fill_super, ctx->fs_info);
+	return get_tree_nodev(fc, proc_fill_super);
 }
 
 static void proc_fs_context_free(struct fs_context *fc)
@@ -186,24 +187,18 @@ static const struct fs_context_operations proc_fs_context_ops = {
 static int proc_init_fs_context(struct fs_context *fc)
 {
 	struct proc_fs_context *ctx;
-	struct pid_namespace *pid_ns;
 
 	ctx = kzalloc(sizeof(struct proc_fs_context), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 
-	pid_ns = get_pid_ns(task_active_pid_ns(current));
-
-	if (!pid_ns->proc_mnt) {
-		ctx->fs_info = kzalloc(sizeof(struct proc_fs_info), GFP_KERNEL);
-		if (!ctx->fs_info) {
-			kfree(ctx);
-			return -ENOMEM;
-		}
-		ctx->fs_info->pid_ns = pid_ns;
-	} else {
-		ctx->fs_info = proc_sb_info(pid_ns->proc_mnt->mnt_sb);
+	ctx->fs_info = kzalloc(sizeof(struct proc_fs_info), GFP_KERNEL);
+	if (!ctx->fs_info) {
+		kfree(ctx);
+		return -ENOMEM;
 	}
+
+	ctx->fs_info->pid_ns = get_pid_ns(task_active_pid_ns(current));
 
 	put_user_ns(fc->user_ns);
 	fc->user_ns = get_user_ns(ctx->fs_info->pid_ns->user_ns);
