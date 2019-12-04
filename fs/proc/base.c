@@ -699,9 +699,9 @@ static bool has_pid_permissions(struct proc_fs_info *fs_info,
 				 struct task_struct *task,
 				 int hide_pid_min)
 {
-	if (fs_info->hide_pid < hide_pid_min)
+	if (proc_fs_hide_pid(fs_info) < hide_pid_min)
 		return true;
-	if (in_group_p(fs_info->pid_gid))
+	if (in_group_p(proc_fs_pid_gid(fs_info)))
 		return true;
 	return ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS);
 }
@@ -720,7 +720,7 @@ static int proc_pid_permission(struct inode *inode, int mask)
 	put_task_struct(task);
 
 	if (!has_perms) {
-		if (fs_info->hide_pid == HIDEPID_INVISIBLE) {
+		if (proc_fs_hide_pid(fs_info) == HIDEPID_INVISIBLE) {
 			/*
 			 * Let's make getdents(), stat(), and open()
 			 * consistent with each other.  If a process

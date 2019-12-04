@@ -91,14 +91,14 @@ static void proc_apply_options(struct super_block *s,
 
 	if (pid_ns->proc_mnt) {
 		struct proc_fs_info *fs_info = proc_sb_info(pid_ns->proc_mnt->mnt_sb);
-		ctx->fs_info->pid_gid = fs_info->pid_gid;
-		ctx->fs_info->hide_pid = fs_info->hide_pid;
+		proc_fs_set_pid_gid(ctx->fs_info, proc_fs_pid_gid(fs_info));
+		proc_fs_set_hide_pid(ctx->fs_info, proc_fs_hide_pid(fs_info));
 	}
 
 	if (ctx->mask & (1 << Opt_gid))
-		ctx->fs_info->pid_gid = make_kgid(user_ns, ctx->gid);
+		proc_fs_set_pid_gid(ctx->fs_info, make_kgid(user_ns, ctx->gid));
 	if (ctx->mask & (1 << Opt_hidepid))
-		ctx->fs_info->hide_pid = ctx->hidepid;
+		proc_fs_set_hide_pid(ctx->fs_info, ctx->hidepid);
 }
 
 static int proc_fill_super(struct super_block *s, struct fs_context *fc)
