@@ -17,6 +17,7 @@ enum {
 	HIDEPID_OFF	  = 0,
 	HIDEPID_NO_ACCESS = 1,
 	HIDEPID_INVISIBLE = 2,
+	HIDEPID_NOT_PTRACABLE = 3, /* Limit pids to only ptracable pids */
 };
 
 struct proc_fs_info {

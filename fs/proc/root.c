@@ -70,8 +70,8 @@ static int proc_parse_param(struct fs_context *fc, struct fs_parameter *param)
 	case Opt_hidepid:
 		ctx->hidepid = result.uint_32;
 		if (ctx->hidepid < HIDEPID_OFF ||
-		    ctx->hidepid > HIDEPID_INVISIBLE)
-			return invalf(fc, "proc: hidepid value must be between 0 and 2.\n");
+		    ctx->hidepid > HIDEPID_NOT_PTRACABLE)
+			return invalf(fc, "proc: hidepid value must be between 0 and 3.\n");
 		break;
 
 	default:
