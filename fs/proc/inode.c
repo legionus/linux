@@ -107,12 +107,16 @@ static int proc_show_options(struct seq_file *seq, struct dentry *root)
 	struct proc_fs_info *fs_info = proc_sb_info(root->d_sb);
 	int hidepid = proc_fs_hide_pid(fs_info);
 	kgid_t gid = proc_fs_pid_gid(fs_info);
+	int pidonly = proc_fs_pidonly(fs_info);
 
 	if (!gid_eq(gid, GLOBAL_ROOT_GID))
 		seq_printf(seq, ",gid=%u", from_kgid_munged(&init_user_ns, gid));
 
 	if (hidepid != HIDEPID_OFF)
 		seq_printf(seq, ",hidepid=%u", hidepid);
+
+	if (pidonly != PROC_PIDONLY_OFF)
+		seq_printf(seq, ",pidonly=%u", pidonly);
 
 	return 0;
 }
@@ -333,11 +337,15 @@ proc_reg_get_unmapped_area(struct file *file, unsigned long orig_addr,
 
 static int proc_reg_open(struct inode *inode, struct file *file)
 {
+	struct proc_fs_info *fs_info = proc_sb_info(inode->i_sb);
 	struct proc_dir_entry *pde = PDE(inode);
 	int rv = 0;
 	typeof_member(struct file_operations, open) open;
 	typeof_member(struct file_operations, release) release;
 	struct pde_opener *pdeo;
+
+	if (proc_fs_pidonly(fs_info) == PROC_PIDONLY_ON)
+		return -ENOENT;
 
 	/*
 	 * Ensure that

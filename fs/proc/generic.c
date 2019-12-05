@@ -267,6 +267,11 @@ struct dentry *proc_lookup_de(struct inode *dir, struct dentry *dentry,
 struct dentry *proc_lookup(struct inode *dir, struct dentry *dentry,
 		unsigned int flags)
 {
+	struct proc_fs_info *fs_info = proc_sb_info(dir->i_sb);
+
+	if (proc_fs_pidonly(fs_info) == PROC_PIDONLY_ON)
+		return ERR_PTR(-ENOENT);
+
 	return proc_lookup_de(dir, dentry, PDE(dir));
 }
 
@@ -323,8 +328,22 @@ int proc_readdir_de(struct file *file, struct dir_context *ctx,
 int proc_readdir(struct file *file, struct dir_context *ctx)
 {
 	struct inode *inode = file_inode(file);
+	struct proc_fs_info *fs_info = proc_sb_info(inode->i_sb);
+
+	if (proc_fs_pidonly(fs_info) == PROC_PIDONLY_ON)
+		return 1;
 
 	return proc_readdir_de(file, ctx, PDE(inode));
+}
+
+static int proc_dir_open(struct inode *inode, struct file *file)
+{
+	struct proc_fs_info *fs_info = proc_sb_info(inode->i_sb);
+
+	if (proc_fs_pidonly(fs_info) == PROC_PIDONLY_ON)
+		return -ENOENT;
+
+	return 0;
 }
 
 /*
@@ -336,6 +355,7 @@ static const struct file_operations proc_dir_operations = {
 	.llseek			= generic_file_llseek,
 	.read			= generic_read_dir,
 	.iterate_shared		= proc_readdir,
+	.open			= proc_dir_open,
 };
 
 /*

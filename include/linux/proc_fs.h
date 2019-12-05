@@ -20,6 +20,12 @@ enum {
 	HIDEPID_NOT_PTRACABLE = 3, /* Limit pids to only ptracable pids */
 };
 
+/* definitions for proc mount option pidonly */
+enum {
+	PROC_PIDONLY_OFF = 0,
+	PROC_PIDONLY_ON  = 1,
+};
+
 struct proc_fs_info {
 	struct list_head pidns_entry;    /* Node in procfs_mounts of a pidns */
 	struct super_block *m_super;
@@ -28,6 +34,7 @@ struct proc_fs_info {
 	struct dentry *proc_thread_self; /* For /proc/thread-self */
 	kgid_t pid_gid;
 	int hide_pid;
+	int pidonly;
 };
 
 #ifdef CONFIG_PROC_FS
@@ -39,6 +46,11 @@ static inline struct proc_fs_info *proc_sb_info(struct super_block *sb)
 	return sb->s_fs_info;
 }
 
+static inline void proc_fs_set_pidonly(struct proc_fs_info *fs_info, int value)
+{
+	fs_info->pidonly = value;
+}
+
 static inline void proc_fs_set_hide_pid(struct proc_fs_info *fs_info, int hide_pid)
 {
 	fs_info->hide_pid = hide_pid;
@@ -47,6 +59,11 @@ static inline void proc_fs_set_hide_pid(struct proc_fs_info *fs_info, int hide_p
 static inline void proc_fs_set_pid_gid(struct proc_fs_info *fs_info, kgid_t gid)
 {
 	fs_info->pid_gid = gid;
+}
+
+static inline int proc_fs_pidonly(struct proc_fs_info *fs_info)
+{
+	return fs_info->pidonly;
 }
 
 static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)
@@ -134,12 +151,21 @@ static inline struct proc_fs_info *proc_sb_info(struct super_block *sb)
 	return NULL;
 }
 
+static inline void proc_fs_set_pidonly(struct proc_fs_info *fs_info, int value)
+{
+}
+
 static inline void proc_fs_set_hide_pid(struct proc_fs_info *fs_info, int hide_pid)
 {
 }
 
 static inline void proc_fs_set_pid_gid(struct proc_info_fs *fs_info, kgid_t gid)
 {
+}
+
+static inline void proc_fs_pidonly(struct proc_fs_info *fs_info)
+{
+	return PROC_PIDONLY_OFF;
 }
 
 static inline int proc_fs_hide_pid(struct proc_fs_info *fs_info)

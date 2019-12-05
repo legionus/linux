@@ -34,16 +34,19 @@ struct proc_fs_context {
 	unsigned int		mask;
 	int			hidepid;
 	int			gid;
+	int			pidonly;
 };
 
 enum proc_param {
 	Opt_gid,
 	Opt_hidepid,
+	Opt_pidonly,
 };
 
 static const struct fs_parameter_spec proc_param_specs[] = {
 	fsparam_u32("gid",	Opt_gid),
 	fsparam_u32("hidepid",	Opt_hidepid),
+	fsparam_u32("pidonly",	Opt_pidonly),
 	{}
 };
 
@@ -74,6 +77,13 @@ static int proc_parse_param(struct fs_context *fc, struct fs_parameter *param)
 			return invalf(fc, "proc: hidepid value must be between 0 and 3.\n");
 		break;
 
+	case Opt_pidonly:
+		ctx->pidonly = result.uint_32;
+		if (ctx->pidonly < PROC_PIDONLY_OFF ||
+		    ctx->pidonly > PROC_PIDONLY_ON)
+			return invalf(fc, "proc: pidonly value must be 0 or 1.\n");
+		break;
+
 	default:
 		return -EINVAL;
 	}
@@ -94,6 +104,7 @@ static void proc_apply_options(struct proc_fs_info *fs_info,
 
 		proc_fs_set_pid_gid(fs_info, proc_fs_pid_gid(pidns_fs_info));
 		proc_fs_set_hide_pid(fs_info, proc_fs_hide_pid(pidns_fs_info));
+		proc_fs_set_pidonly(fs_info, proc_fs_pidonly(pidns_fs_info));
 	}
 
 	if (ctx->mask & (1 << Opt_gid))
@@ -101,6 +112,9 @@ static void proc_apply_options(struct proc_fs_info *fs_info,
 
 	if (ctx->mask & (1 << Opt_hidepid))
 		proc_fs_set_hide_pid(fs_info, ctx->hidepid);
+
+	if (ctx->mask & (1 << Opt_pidonly))
+		proc_fs_set_pidonly(fs_info, ctx->pidonly);
 }
 
 static int proc_fill_super(struct super_block *s, struct fs_context *fc)
