@@ -112,6 +112,12 @@ static int proc_fill_super(struct super_block *s, struct fs_context *fc)
 
 	proc_apply_options(ctx->fs_info, fc, pid_ns, current_user_ns());
 
+	ctx->fs_info->m_super = s;
+
+	pidns_proc_lock(pid_ns);
+	list_add_tail(&ctx->fs_info->pidns_entry, &pid_ns->proc_mounts);
+	pidns_proc_unlock(pid_ns);
+
 	/* User space would break if executables or devices appear on proc */
 	s->s_iflags |= SB_I_USERNS_VISIBLE | SB_I_NOEXEC | SB_I_NODEV;
 	s->s_flags |= SB_NODIRATIME | SB_NOSUID | SB_NOEXEC;
@@ -215,6 +221,11 @@ static void proc_kill_sb(struct super_block *sb)
 		dput(fs_info->proc_self);
 	if (fs_info->proc_thread_self)
 		dput(fs_info->proc_thread_self);
+
+	pidns_proc_lock(fs_info->pid_ns);
+	list_del(&fs_info->pidns_entry);
+	pidns_proc_unlock(fs_info->pid_ns);
+
 	kill_anon_super(sb);
 	put_pid_ns(fs_info->pid_ns);
 	kfree(fs_info);
@@ -335,6 +346,9 @@ int pid_ns_prepare_proc(struct pid_namespace *ns)
 		get_pid_ns(ns);
 		ctx->fs_info->pid_ns = ns;
 	}
+
+	init_rwsem(&ns->rw_proc_mounts);
+	INIT_LIST_HEAD(&ns->proc_mounts);
 
 	mnt = fc_mount(fc);
 	put_fs_context(fc);

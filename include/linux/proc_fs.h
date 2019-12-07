@@ -20,6 +20,8 @@ enum {
 };
 
 struct proc_fs_info {
+	struct list_head pidns_entry;    /* Node in procfs_mounts of a pidns */
+	struct super_block *m_super;
 	struct pid_namespace *pid_ns;
 	struct dentry *proc_self;        /* For /proc/self */
 	struct dentry *proc_thread_self; /* For /proc/thread-self */
