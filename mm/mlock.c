@@ -812,15 +812,10 @@ SYSCALL_DEFINE0(munlockall)
 	return ret;
 }
 
-/*
- * Objects with different lifetime than processes (SHM_LOCK and SHM_HUGETLB
- * shm segments) get accounted against the user_struct instead.
- */
-static DEFINE_SPINLOCK(shmlock_user_lock);
-
-int user_shm_lock(size_t size, struct user_struct *user)
+int user_shm_lock(size_t size, const struct cred *cred)
 {
 	unsigned long lock_limit, locked;
+	bool overlimit;
 	int allowed = 0;
 
 	locked = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
@@ -828,22 +823,18 @@ int user_shm_lock(size_t size, struct user_struct *user)
 	if (lock_limit == RLIM_INFINITY)
 		allowed = 1;
 	lock_limit >>= PAGE_SHIFT;
-	spin_lock(&shmlock_user_lock);
-	if (!allowed &&
-	    locked + user->locked_shm > lock_limit && !capable(CAP_IPC_LOCK))
-		goto out;
-	get_uid(user);
-	user->locked_shm += locked;
-	allowed = 1;
-out:
-	spin_unlock(&shmlock_user_lock);
-	return allowed;
+
+	overlimit = inc_rlimit_ucounts_and_test(cred->ucounts, UCOUNT_RLIMIT_MEMLOCK,
+			locked, lock_limit);
+
+	if (!allowed && overlimit && !capable(CAP_IPC_LOCK)) {
+		dec_rlimit_ucounts(cred->ucounts, UCOUNT_RLIMIT_MEMLOCK, locked);
+		return 0;
+	}
+	return 1;
 }
 
-void user_shm_unlock(size_t size, struct user_struct *user)
+void user_shm_unlock(size_t size, const struct cred *cred)
 {
-	spin_lock(&shmlock_user_lock);
-	user->locked_shm -= (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
-	spin_unlock(&shmlock_user_lock);
-	free_uid(user);
+	dec_rlimit_ucounts(cred->ucounts, UCOUNT_RLIMIT_MEMLOCK, (size + PAGE_SIZE - 1) >> PAGE_SHIFT);
 }

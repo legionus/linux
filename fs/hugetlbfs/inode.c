@@ -1451,34 +1451,35 @@ static int get_hstate_idx(int page_size_log)
  * otherwise hugetlb_reserve_pages reserves one less hugepages than intended.
  */
 struct file *hugetlb_file_setup(const char *name, size_t size,
-				vm_flags_t acctflag, struct user_struct **user,
+				vm_flags_t acctflag,
 				int creat_flags, int page_size_log)
 {
 	struct inode *inode;
 	struct vfsmount *mnt;
 	int hstate_idx;
 	struct file *file;
+	const struct cred *cred;
 
 	hstate_idx = get_hstate_idx(page_size_log);
 	if (hstate_idx < 0)
 		return ERR_PTR(-ENODEV);
 
-	*user = NULL;
 	mnt = hugetlbfs_vfsmount[hstate_idx];
 	if (!mnt)
 		return ERR_PTR(-ENOENT);
 
 	if (creat_flags == HUGETLB_SHMFS_INODE && !can_do_hugetlb_shm()) {
-		*user = current_user();
-		if (user_shm_lock(size, *user)) {
+		cred = current_cred();
+		if (user_shm_lock(size, cred)) {
 			task_lock(current);
 			pr_warn_once("%s (%d): Using mlock ulimits for SHM_HUGETLB is deprecated\n",
 				current->comm, current->pid);
 			task_unlock(current);
 		} else {
-			*user = NULL;
 			return ERR_PTR(-EPERM);
 		}
+	} else {
+		cred = NULL;
 	}
 
 	file = ERR_PTR(-ENOSPC);
@@ -1503,10 +1504,8 @@ struct file *hugetlb_file_setup(const char *name, size_t size,
 
 	iput(inode);
 out:
-	if (*user) {
-		user_shm_unlock(size, *user);
-		*user = NULL;
-	}
+	if (cred)
+		user_shm_unlock(size, cred);
 	return file;
 }
 
