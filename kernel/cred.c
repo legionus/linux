@@ -119,6 +119,8 @@ static void put_cred_rcu(struct rcu_head *rcu)
 	if (cred->group_info)
 		put_group_info(cred->group_info);
 	free_uid(cred->user);
+	if (cred->ucounts)
+		put_ucounts(cred->ucounts);
 	put_user_ns(cred->user_ns);
 	kmem_cache_free(cred_jar, cred);
 }
@@ -143,6 +145,9 @@ void __put_cred(struct cred *cred)
 #endif
 	BUG_ON(cred == current->cred);
 	BUG_ON(cred == current->real_cred);
+
+	if (cred->ucounts)
+		BUG_ON(cred->ucounts->ns != cred->user_ns);
 
 	if (cred->non_rcu)
 		put_cred_rcu(&cred->rcu);
@@ -270,6 +275,7 @@ struct cred *prepare_creds(void)
 	get_group_info(new->group_info);
 	get_uid(new->user);
 	get_user_ns(new->user_ns);
+	get_ucounts(new->ucounts);
 
 #ifdef CONFIG_KEYS
 	key_get(new->session_keyring);
@@ -363,6 +369,7 @@ int copy_creds(struct task_struct *p, unsigned long clone_flags)
 		ret = create_user_ns(new);
 		if (ret < 0)
 			goto error_put;
+		set_cred_ucounts(new, new->user_ns, new->euid);
 	}
 
 #ifdef CONFIG_KEYS
@@ -485,8 +492,11 @@ int commit_creds(struct cred *new)
 	 * in set_user().
 	 */
 	alter_cred_subscribers(new, 2);
-	if (new->user != old->user)
-		atomic_inc(&new->user->processes);
+	if (new->user != old->user || new->user_ns != old->user_ns) {
+		if (new->user != old->user)
+			atomic_inc(&new->user->processes);
+		set_cred_ucounts(new, new->user_ns, new->euid);
+	}
 	rcu_assign_pointer(task->real_cred, new);
 	rcu_assign_pointer(task->cred, new);
 	if (new->user != old->user)
@@ -661,6 +671,11 @@ void __init cred_init(void)
 	/* allocate a slab in which we can store credentials */
 	cred_jar = kmem_cache_create("cred_jar", sizeof(struct cred), 0,
 			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT, NULL);
+	/*
+	 * This is needed here because this is the first cred and there is no
+	 * ucount reference to copy.
+	 */
+	set_cred_ucounts(&init_cred, &init_user_ns, GLOBAL_ROOT_UID);
 }
 
 /**
@@ -704,6 +719,7 @@ struct cred *prepare_kernel_cred(struct task_struct *daemon)
 	get_uid(new->user);
 	get_user_ns(new->user_ns);
 	get_group_info(new->group_info);
+	get_ucounts(new->ucounts);
 
 #ifdef CONFIG_KEYS
 	new->session_keyring = NULL;

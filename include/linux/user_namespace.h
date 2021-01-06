@@ -85,7 +85,7 @@ struct user_namespace {
 	struct ctl_table_header *sysctls;
 #endif
 	struct ucounts		*ucounts;
-	int ucount_max[UCOUNT_COUNTS];
+	long ucount_max[UCOUNT_COUNTS];
 } __randomize_layout;
 
 struct ucounts {
@@ -93,7 +93,7 @@ struct ucounts {
 	struct user_namespace *ns;
 	kuid_t uid;
 	refcount_t count;
-	atomic_t ucount[UCOUNT_COUNTS];
+	atomic_long_t ucount[UCOUNT_COUNTS];
 };
 
 extern struct user_namespace init_user_ns;
@@ -102,6 +102,15 @@ bool setup_userns_sysctls(struct user_namespace *ns);
 void retire_userns_sysctls(struct user_namespace *ns);
 struct ucounts *inc_ucount(struct user_namespace *ns, kuid_t uid, enum ucount_type type);
 void dec_ucount(struct ucounts *ucounts, enum ucount_type type);
+void put_ucounts(struct ucounts *ucounts);
+void set_cred_ucounts(struct cred *cred, struct user_namespace *ns, kuid_t uid);
+
+static inline struct ucounts *get_ucounts(struct ucounts *ucounts)
+{
+	if (ucounts)
+		refcount_inc(&ucounts->count);
+	return ucounts;
+}
 
 #ifdef CONFIG_USER_NS
 
