@@ -133,8 +133,14 @@ static struct ucounts *find_ucounts(struct user_namespace *ns, kuid_t uid, struc
 	struct ucounts *ucounts;
 
 	hlist_for_each_entry(ucounts, hashent, node) {
-		if (uid_eq(ucounts->uid, uid) && (ucounts->ns == ns))
+		if (uid_eq(ucounts->uid, uid) && (ucounts->ns == ns)) {
+			long count = atomic_add_return(1, &ucounts->count);
+			if (count < 0)
+				return ERR_PTR(-ERANGE);
+			else if (count < 2)
+				return ERR_PTR(-EFAULT);
 			return ucounts;
+		}
 	}
 	return NULL;
 }
@@ -185,7 +191,11 @@ struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid)
 		}
 	}
 	spin_unlock_irq(&ucounts_lock);
-	ucounts = get_ucounts(ucounts);
+	if (IS_ERR(ucounts)) {
+		if (PTR_ERR(ucounts) == -ERANGE)
+			put_ucounts(ucounts);
+		ucounts = NULL;
+	}
 	return ucounts;
 }
 
