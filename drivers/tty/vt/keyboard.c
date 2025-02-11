@@ -391,17 +391,18 @@ static void set_leds(void)
 
 static void do_compute_shiftstate(void)
 {
-	unsigned int k, sym, val;
+	unsigned int k, val;
+	kunicode_t sym;
 
 	shift_state = 0;
 	memset(shift_down, 0, sizeof(shift_down));
 
 	for_each_set_bit(k, key_down, min(NR_KEYS, KEY_CNT)) {
-		sym = U(key_maps[0][k]);
-		if (KTYP(sym) != KT_SHIFT && KTYP(sym) != KT_SLOCK)
+		sym = key_maps[0][k];
+		if (kunicode_ktyp(sym) != KT_SHIFT && kunicode_ktyp(sym) != KT_SLOCK)
 			continue;
 
-		val = KVAL(sym);
+		val = kunicode_kval(sym);
 		if (val == KVAL(K_CAPSSHIFT))
 			val = KVAL(K_SHIFT);
 
@@ -1395,7 +1396,7 @@ static void kbd_rawcode(unsigned char data)
 static void kbd_keycode(unsigned int keycode, int down, bool hw_raw)
 {
 	struct vc_data *vc = vc_cons[fg_console].d;
-	unsigned short keysym, *key_map;
+	kunicode_t keysym, *key_map;
 	unsigned char type;
 	bool raw_mode;
 	struct tty_struct *tty;
@@ -1483,19 +1484,19 @@ static void kbd_keycode(unsigned int keycode, int down, bool hw_raw)
 	if (keycode < NR_KEYS)
 		keysym = key_map[keycode];
 	else if (keycode >= KEY_BRL_DOT1 && keycode <= KEY_BRL_DOT8)
-		keysym = U(K(KT_BRL, keycode - KEY_BRL_DOT1 + 1));
+		keysym = make_kunicode(K(KT_BRL, keycode - KEY_BRL_DOT1 + 1));
 	else
 		return;
 
-	type = KTYP(keysym);
+	type = kunicode_ktyp(keysym);
 
 	if (type < 0xf0) {
-		param.value = keysym;
+		param.value = kunicode_export(keysym);
 		rc = atomic_notifier_call_chain(&keyboard_notifier_list,
 						KBD_UNICODE, &param);
 		if (rc != NOTIFY_STOP)
 			if (down && !raw_mode)
-				k_unicode(vc, keysym, !down);
+				k_unicode(vc, kunicode_raw(keysym), !down);
 		return;
 	}
 
@@ -1510,7 +1511,7 @@ static void kbd_keycode(unsigned int keycode, int down, bool hw_raw)
 		}
 	}
 
-	param.value = keysym;
+	param.value = kunicode_export(keysym);
 	rc = atomic_notifier_call_chain(&keyboard_notifier_list,
 					KBD_KEYSYM, &param);
 	if (rc == NOTIFY_STOP)
@@ -1519,7 +1520,7 @@ static void kbd_keycode(unsigned int keycode, int down, bool hw_raw)
 	if ((raw_mode || kbd->kbdmode == VC_OFF) && type != KT_SPEC && type != KT_SHIFT)
 		return;
 
-	(*k_handler[type])(vc, KVAL(keysym), !down);
+	(*k_handler[type])(vc, kunicode_kval(keysym), !down);
 
 	param.ledstate = kbd->ledflagstate;
 	atomic_notifier_call_chain(&keyboard_notifier_list, KBD_POST_KEYSYM, &param);
@@ -1917,21 +1918,21 @@ int vt_do_kbkeycode_ioctl(int cmd, struct kbkeycode __user *user_kbkc,
 	return kc;
 }
 
-static unsigned short vt_kdgkbent(unsigned char kbdmode, unsigned char idx,
+static kunicode_t vt_kdgkbent(unsigned char kbdmode, unsigned char idx,
 		unsigned char map)
 {
-	unsigned short *key_map, val;
+	kunicode_t *key_map, val;
 	unsigned long flags;
 
 	/* Ensure another thread doesn't free it under us */
 	spin_lock_irqsave(&kbd_event_lock, flags);
 	key_map = key_maps[map];
 	if (key_map) {
-		val = U(key_map[idx]);
-		if (kbdmode != VC_UNICODE && KTYP(val) >= NR_TYPES)
-			val = K_HOLE;
+		val = key_map[idx];
+		if (kbdmode != VC_UNICODE && kunicode_ktyp(key_map[idx]) >= NR_TYPES)
+			val = KUNICODE_INIT(K_HOLE);
 	} else
-		val = idx ? K_HOLE : K_NOSUCHMAP;
+		val = KUNICODE_INIT(idx ? K_HOLE : K_NOSUCHMAP);
 	spin_unlock_irqrestore(&kbd_event_lock, flags);
 
 	return val;
@@ -1941,7 +1942,7 @@ static int vt_kdskbent(unsigned char kbdmode, unsigned char idx,
 		unsigned char map, unsigned short val)
 {
 	unsigned long flags;
-	unsigned short *key_map, *new_map, oldval;
+	kunicode_t *key_map, *new_map, newval, oldval;
 
 	if (!idx && val == K_NOSUCHMAP) {
 		spin_lock_irqsave(&kbd_event_lock, flags);
@@ -1949,7 +1950,7 @@ static int vt_kdskbent(unsigned char kbdmode, unsigned char idx,
 		key_map = key_maps[map];
 		if (map && key_map) {
 			key_maps[map] = NULL;
-			if (key_map[0] == U(K_ALLOCATED)) {
+			if (kunicode_eq(key_map[0], make_kunicode(K_ALLOCATED))) {
 				kfree(key_map);
 				keymap_count--;
 			}
@@ -1989,25 +1990,29 @@ static int vt_kdskbent(unsigned char kbdmode, unsigned char idx,
 		}
 		key_maps[map] = new_map;
 		key_map = new_map;
-		key_map[0] = U(K_ALLOCATED);
+		key_map[0] = make_kunicode(K_ALLOCATED);
 		for (j = 1; j < NR_KEYS; j++)
-			key_map[j] = U(K_HOLE);
+			key_map[j] = make_kunicode(K_HOLE);
 		keymap_count++;
 	} else
 		kfree(new_map);
 
-	oldval = U(key_map[idx]);
-	if (val == oldval)
+	newval = make_kunicode(val);
+	oldval = key_map[idx];
+
+	if (kunicode_eq(newval, oldval))
 		goto out;
 
 	/* Attention Key */
-	if ((oldval == K_SAK || val == K_SAK) && !capable(CAP_SYS_ADMIN)) {
+	if ((kunicode_eq(oldval, make_kunicode(K_SAK)) ||
+	     kunicode_eq(newval, make_kunicode(K_SAK))) &&
+	    !capable(CAP_SYS_ADMIN)) {
 		spin_unlock_irqrestore(&kbd_event_lock, flags);
 		return -EPERM;
 	}
 
-	key_map[idx] = U(val);
-	if (!map && (KTYP(oldval) == KT_SHIFT || KTYP(val) == KT_SHIFT))
+	key_map[idx] = newval;
+	if (!map && (kunicode_ktyp(oldval) == KT_SHIFT || kunicode_ktyp(newval) == KT_SHIFT))
 		do_compute_shiftstate();
 out:
 	spin_unlock_irqrestore(&kbd_event_lock, flags);
@@ -2025,10 +2030,11 @@ int vt_do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm,
 		return -EFAULT;
 
 	switch (cmd) {
-	case KDGKBENT:
-		return put_user(vt_kdgkbent(kb->kbdmode, kbe.kb_index,
-					kbe.kb_table),
-				&user_kbe->kb_value);
+	case KDGKBENT: {
+		kunicode_t value = vt_kdgkbent(kb->kbdmode, kbe.kb_index,
+						kbe.kb_table);
+		return put_user(kunicode_export(value), &user_kbe->kb_value);
+		}
 	case KDSKBENT:
 		if (!perm || !capable(CAP_SYS_TTY_CONFIG))
 			return -EPERM;

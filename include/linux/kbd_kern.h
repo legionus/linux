@@ -119,8 +119,6 @@ static inline void chg_vc_kbd_led(struct kbd_struct * kbd, int flag)
 	kbd->ledflagstate ^= 1 << flag;
 }
 
-#define U(x) ((x) ^ 0xf000)
-
 #define BRL_UC_ROW 0x2800
 
 /* keyboard.c */
