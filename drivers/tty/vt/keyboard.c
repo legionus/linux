@@ -146,7 +146,7 @@ static bool dead_key_next;
 static bool npadch_active;
 static unsigned int npadch_value;
 
-static unsigned int diacr;
+static kunicode_t diacr;
 static bool rep;			/* flag telling character repeat */
 
 static int shift_state = 0;
@@ -436,24 +436,25 @@ void vt_set_leds_compute_shiftstate(void)
  * Otherwise, conclude that DIACR was not combining after all,
  * queue it and return CH.
  */
-static unsigned int handle_diacr(struct vc_data *vc, unsigned int ch)
+static kunicode_t handle_diacr(struct vc_data *vc, kunicode_t unicode)
 {
-	unsigned int d = diacr;
+	u32 d = kunicode_export(diacr);
+	u32 ch = kunicode_export(unicode);
 	unsigned int i;
 
-	diacr = 0;
+	diacr = KUNICODE_INIT(0);
 
 	if ((d & ~0xff) == BRL_UC_ROW) {
 		if ((ch & ~0xff) == BRL_UC_ROW)
-			return d | ch;
+			return KUNICODE_INIT(d | ch);
 	} else {
 		for (i = 0; i < accent_table_size; i++)
 			if (accent_table[i].diacr == d && accent_table[i].base == ch)
-				return accent_table[i].result;
+				return KUNICODE_INIT(accent_table[i].result);
 	}
 
 	if (ch == ' ' || ch == (BRL_UC_ROW|0) || ch == d)
-		return d;
+		return KUNICODE_INIT(d);
 
 	if (kbd->kbdmode == VC_UNICODE)
 		to_utf8(vc, d);
@@ -463,7 +464,7 @@ static unsigned int handle_diacr(struct vc_data *vc, unsigned int ch)
 			put_queue(vc, c);
 	}
 
-	return ch;
+	return unicode;
 }
 
 /*
@@ -471,15 +472,15 @@ static unsigned int handle_diacr(struct vc_data *vc, unsigned int ch)
  */
 static void fn_enter(struct vc_data *vc)
 {
-	if (diacr) {
+	if (!empty_kunicode(diacr)) {
 		if (kbd->kbdmode == VC_UNICODE)
-			to_utf8(vc, diacr);
+			to_utf8(vc, kunicode_export(diacr));
 		else {
-			int c = conv_uni_to_8bit(diacr);
+			int c = conv_uni_to_8bit(kunicode_export(diacr));
 			if (c != -1)
 				put_queue(vc, c);
 		}
-		diacr = 0;
+		diacr = KUNICODE_INIT(0);
 	}
 
 	put_queue(vc, '\r');
@@ -678,23 +679,23 @@ static void k_lowercase(struct vc_data *vc, kunicode_t unicode, char up_flag)
 	pr_err("k_lowercase was called - impossible\n");
 }
 
-static void k_unicode(struct vc_data *vc, unsigned int value, char up_flag)
+static void k_unicode(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	if (up_flag)
 		return;		/* no action, if this is a key release */
 
-	if (diacr)
-		value = handle_diacr(vc, value);
+	if (!empty_kunicode(diacr))
+		unicode = handle_diacr(vc, unicode);
 
 	if (dead_key_next) {
 		dead_key_next = false;
-		diacr = value;
+		diacr = unicode;
 		return;
 	}
 	if (kbd->kbdmode == VC_UNICODE)
-		to_utf8(vc, value);
+		to_utf8(vc, kunicode_export(unicode));
 	else {
-		int c = conv_uni_to_8bit(value);
+		int c = conv_uni_to_8bit(kunicode_export(unicode));
 		if (c != -1)
 			put_queue(vc, c);
 	}
@@ -705,22 +706,24 @@ static void k_unicode(struct vc_data *vc, unsigned int value, char up_flag)
  * dead keys modifying the same character. Very useful
  * for Vietnamese.
  */
-static void k_deadunicode(struct vc_data *vc, unsigned int value, char up_flag)
+static void k_deadunicode(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	if (up_flag)
 		return;
 
-	diacr = (diacr ? handle_diacr(vc, value) : value);
+	diacr = (!empty_kunicode(diacr) ? handle_diacr(vc, unicode) : unicode);
 }
 
 static void k_self(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
-	k_unicode(vc, conv_8bit_to_uni(kunicode_kval(unicode)), up_flag);
+	u32 value = kunicode_kval(unicode);
+	k_unicode(vc, KUNICODE_INIT(conv_8bit_to_uni(value)), up_flag);
 }
 
 static void k_dead2(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
-	k_deadunicode(vc, kunicode_kval(unicode), up_flag);
+	u32 value = kunicode_kval(unicode);
+	k_deadunicode(vc, KUNICODE_INIT(value), up_flag);
 }
 
 /*
@@ -759,7 +762,7 @@ static void k_dead(struct vc_data *vc, kunicode_t unicode, char up_flag)
 	};
 	u32 value = kunicode_kval(unicode);
 
-	k_deadunicode(vc, ret_diacr[value], up_flag);
+	k_deadunicode(vc, KUNICODE_INIT(ret_diacr[value]), up_flag);
 }
 
 static void k_cons(struct vc_data *vc, kunicode_t unicode, char up_flag)
@@ -995,12 +998,12 @@ static void k_brlcommit(struct vc_data *vc, unsigned int pattern, char up_flag)
 	static unsigned committed;
 
 	if (!brl_nbchords)
-		k_deadunicode(vc, BRL_UC_ROW | pattern, up_flag);
+		k_deadunicode(vc, KUNICODE_INIT(BRL_UC_ROW | pattern), up_flag);
 	else {
 		committed |= pattern;
 		chords++;
 		if (chords == brl_nbchords) {
-			k_unicode(vc, BRL_UC_ROW | committed, up_flag);
+			k_unicode(vc, KUNICODE_INIT(BRL_UC_ROW | committed), up_flag);
 			chords = 0;
 			committed = 0;
 		}
@@ -1022,7 +1025,7 @@ static void k_brl(struct vc_data *vc, kunicode_t unicode, char up_flag)
 	value = kunicode_kval(unicode);
 
 	if (!value) {
-		k_unicode(vc, BRL_UC_ROW, up_flag);
+		k_unicode(vc, KUNICODE_INIT(BRL_UC_ROW), up_flag);
 		return;
 	}
 
@@ -1530,7 +1533,7 @@ static void kbd_keycode(unsigned int keycode, int down, bool hw_raw)
 						KBD_UNICODE, &param);
 		if (rc != NOTIFY_STOP)
 			if (down && !raw_mode)
-				k_unicode(vc, kunicode_raw(keysym), !down);
+				k_unicode(vc, keysym, !down);
 		return;
 	}
 

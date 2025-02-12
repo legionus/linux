@@ -22,6 +22,11 @@ static inline unsigned short kunicode_raw(kunicode_t unicode)
 	return unicode.val;
 }
 
+static inline unsigned short empty_kunicode(kunicode_t unicode)
+{
+	return kunicode_raw(unicode) == 0;
+}
+
 /*
  * For now, export means the same as raw value because the size is the same as
  * the previous size.
