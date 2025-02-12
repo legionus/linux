@@ -76,7 +76,7 @@ static inline int kbd_defleds(void)
 	k_meta,		k_ascii,	k_lock,		k_lowercase,\
 	k_slock,	k_dead2,	k_brl,		k_ignore
 
-typedef void (k_handler_fn)(struct vc_data *vc, unsigned char value,
+typedef void (k_handler_fn)(struct vc_data *vc, kunicode_t value,
 			    char up_flag);
 static k_handler_fn K_HANDLERS;
 static k_handler_fn *k_handler[16] = { K_HANDLERS };
@@ -650,14 +650,19 @@ static void fn_null(struct vc_data *vc)
 /*
  * Special key handlers
  */
-static void k_ignore(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_ignore(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 }
 
-static void k_spec(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_spec(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
+	u32 value;
+
 	if (up_flag)
 		return;
+
+	value = kunicode_kval(unicode);
+
 	if (value >= ARRAY_SIZE(fn_handler))
 		return;
 	if ((kbd->kbdmode == VC_RAW ||
@@ -668,7 +673,7 @@ static void k_spec(struct vc_data *vc, unsigned char value, char up_flag)
 	fn_handler[value](vc);
 }
 
-static void k_lowercase(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_lowercase(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	pr_err("k_lowercase was called - impossible\n");
 }
@@ -708,20 +713,20 @@ static void k_deadunicode(struct vc_data *vc, unsigned int value, char up_flag)
 	diacr = (diacr ? handle_diacr(vc, value) : value);
 }
 
-static void k_self(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_self(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
-	k_unicode(vc, conv_8bit_to_uni(value), up_flag);
+	k_unicode(vc, conv_8bit_to_uni(kunicode_kval(unicode)), up_flag);
 }
 
-static void k_dead2(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_dead2(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
-	k_deadunicode(vc, value, up_flag);
+	k_deadunicode(vc, kunicode_kval(unicode), up_flag);
 }
 
 /*
  * Obsolete - for backwards compatibility only
  */
-static void k_dead(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_dead(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	static const unsigned char ret_diacr[NR_DEAD] = {
 		'`',	/* dead_grave */
@@ -752,24 +757,29 @@ static void k_dead(struct vc_data *vc, unsigned char value, char up_flag)
 		'$',	/* dead_currency */
 		'@',	/* dead_greek */
 	};
+	u32 value = kunicode_kval(unicode);
 
 	k_deadunicode(vc, ret_diacr[value], up_flag);
 }
 
-static void k_cons(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_cons(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	if (up_flag)
 		return;
 
-	set_console(value);
+	set_console(kunicode_kval(unicode));
 }
 
-static void k_fn(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_fn(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
+	u32 value;
+
 	if (up_flag)
 		return;
 
-	if ((unsigned)value < ARRAY_SIZE(func_table)) {
+	value = kunicode_kval(unicode);
+
+	if (value < ARRAY_SIZE(func_table)) {
 		unsigned long flags;
 
 		spin_lock_irqsave(&func_buf_lock, flags);
@@ -781,23 +791,30 @@ static void k_fn(struct vc_data *vc, unsigned char value, char up_flag)
 		pr_err("k_fn called with value=%d\n", value);
 }
 
-static void k_cur(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_cur(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	static const char cur_chars[] = "BDCA";
+	u32 value;
 
 	if (up_flag)
 		return;
 
-	applkey(vc, cur_chars[value], vc_kbd_mode(kbd, VC_CKMODE));
+	value = kunicode_kval(unicode);
+
+	if (value < ARRAY_SIZE(cur_chars))
+		applkey(vc, cur_chars[value], vc_kbd_mode(kbd, VC_CKMODE));
 }
 
-static void k_pad(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_pad(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	static const char pad_chars[] = "0123456789+-*/\015,.?()#";
 	static const char app_map[] = "pqrstuvwxylSRQMnnmPQS";
+	u32 value;
 
 	if (up_flag)
 		return;		/* no action, if this is a key release */
+
+	value = kunicode_kval(unicode);
 
 	/* kludge... shift forces cursor/number keys */
 	if (vc_kbd_mode(kbd, VC_APPLIC) && !shift_down[KG_SHIFT]) {
@@ -810,34 +827,34 @@ static void k_pad(struct vc_data *vc, unsigned char value, char up_flag)
 		switch (value) {
 		case KVAL(K_PCOMMA):
 		case KVAL(K_PDOT):
-			k_fn(vc, KVAL(K_REMOVE), 0);
+			k_fn(vc, make_kunicode(K_REMOVE), 0);
 			return;
 		case KVAL(K_P0):
-			k_fn(vc, KVAL(K_INSERT), 0);
+			k_fn(vc, make_kunicode(K_INSERT), 0);
 			return;
 		case KVAL(K_P1):
-			k_fn(vc, KVAL(K_SELECT), 0);
+			k_fn(vc, make_kunicode(K_SELECT), 0);
 			return;
 		case KVAL(K_P2):
-			k_cur(vc, KVAL(K_DOWN), 0);
+			k_cur(vc, make_kunicode(K_DOWN), 0);
 			return;
 		case KVAL(K_P3):
-			k_fn(vc, KVAL(K_PGDN), 0);
+			k_fn(vc, make_kunicode(K_PGDN), 0);
 			return;
 		case KVAL(K_P4):
-			k_cur(vc, KVAL(K_LEFT), 0);
+			k_cur(vc, make_kunicode(K_LEFT), 0);
 			return;
 		case KVAL(K_P6):
-			k_cur(vc, KVAL(K_RIGHT), 0);
+			k_cur(vc, make_kunicode(K_RIGHT), 0);
 			return;
 		case KVAL(K_P7):
-			k_fn(vc, KVAL(K_FIND), 0);
+			k_fn(vc, make_kunicode(K_FIND), 0);
 			return;
 		case KVAL(K_P8):
-			k_cur(vc, KVAL(K_UP), 0);
+			k_cur(vc, make_kunicode(K_UP), 0);
 			return;
 		case KVAL(K_P9):
-			k_fn(vc, KVAL(K_PGUP), 0);
+			k_fn(vc, make_kunicode(K_PGUP), 0);
 			return;
 		case KVAL(K_P5):
 			applkey(vc, 'G', vc_kbd_mode(kbd, VC_APPLIC));
@@ -850,12 +867,15 @@ static void k_pad(struct vc_data *vc, unsigned char value, char up_flag)
 		put_queue(vc, '\n');
 }
 
-static void k_shift(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_shift(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	int old_state = shift_state;
+	u32 value;
 
 	if (rep)
 		return;
+
+	value = kunicode_kval(unicode);
 	/*
 	 * Mimic typewriter:
 	 * a CapsShift key acts like Shift but undoes CapsLock
@@ -891,10 +911,14 @@ static void k_shift(struct vc_data *vc, unsigned char value, char up_flag)
 	}
 }
 
-static void k_meta(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_meta(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
+	u32 value;
+
 	if (up_flag)
 		return;
+
+	value = kunicode_kval(unicode);
 
 	if (vc_kbd_mode(kbd, VC_META)) {
 		put_queue(vc, '\033');
@@ -903,12 +927,15 @@ static void k_meta(struct vc_data *vc, unsigned char value, char up_flag)
 		put_queue(vc, value | BIT(7));
 }
 
-static void k_ascii(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_ascii(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	unsigned int base;
+	u32 value;
 
 	if (up_flag)
 		return;
+
+	value = kunicode_kval(unicode);
 
 	if (value < 10) {
 		/* decimal input of code, while Alt depressed */
@@ -927,19 +954,23 @@ static void k_ascii(struct vc_data *vc, unsigned char value, char up_flag)
 	npadch_value = npadch_value * base + value;
 }
 
-static void k_lock(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_lock(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	if (up_flag || rep)
 		return;
 
-	chg_vc_kbd_lock(kbd, value);
+	chg_vc_kbd_lock(kbd, kunicode_kval(unicode));
 }
 
-static void k_slock(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_slock(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
-	k_shift(vc, value, up_flag);
+	u32 value;
+
+	k_shift(vc, unicode, up_flag);
 	if (up_flag || rep)
 		return;
+
+	value = kunicode_kval(unicode);
 
 	chg_vc_kbd_slock(kbd, value);
 	/* try to make Alt, oops, AltGr and such work */
@@ -976,16 +1007,19 @@ static void k_brlcommit(struct vc_data *vc, unsigned int pattern, char up_flag)
 	}
 }
 
-static void k_brl(struct vc_data *vc, unsigned char value, char up_flag)
+static void k_brl(struct vc_data *vc, kunicode_t unicode, char up_flag)
 {
 	static unsigned pressed, committing;
 	static unsigned long releasestart;
+	u32 value;
 
 	if (kbd->kbdmode != VC_UNICODE) {
 		if (!up_flag)
 			pr_warn("keyboard mode must be unicode for braille patterns\n");
 		return;
 	}
+
+	value = kunicode_kval(unicode);
 
 	if (!value) {
 		k_unicode(vc, BRL_UC_ROW, up_flag);
@@ -1520,7 +1554,7 @@ static void kbd_keycode(unsigned int keycode, int down, bool hw_raw)
 	if ((raw_mode || kbd->kbdmode == VC_OFF) && type != KT_SPEC && type != KT_SHIFT)
 		return;
 
-	(*k_handler[type])(vc, kunicode_kval(keysym), !down);
+	(*k_handler[type])(vc, keysym, !down);
 
 	param.ledstate = kbd->ledflagstate;
 	atomic_notifier_call_chain(&keyboard_notifier_list, KBD_POST_KEYSYM, &param);
